@@ -919,7 +919,8 @@ namespace
             plist_dict_set_item(dictionary, "iTunesURL", plist_new_string(std::string(iTunesURL).c_str()));
     }
 
-    std::vector<uint8_t> BuildOfficialCatalog(bmt::PackTable& packs)
+    std::vector<uint8_t> BuildOfficialCatalog(bmt::PackTable& packs,
+                                              std::vector<bmt::Diagnostic>& warnings)
     {
         std::unordered_map<uint32_t, bmt::MusicPack*> byID;
         for (auto& [id, instances] : packs)
@@ -939,8 +940,12 @@ namespace
                 continue;
             const auto extension = byID.find(pack.extID);
             if (extension == byID.end())
-                throw std::runtime_error("base pack " + std::to_string(id) +
-                                         " references missing ext pack " + std::to_string(pack.extID));
+            {
+                warnings.push_back({pack.sourcePath,
+                                    "omitting missing ext pack " + std::to_string(pack.extID) +
+                                    " from mulist for base pack " + std::to_string(id)});
+                continue;
+            }
             if (!baseByExtension.emplace(pack.extID, &pack).second)
                 throw std::runtime_error("multiple base packs reference ext pack " + std::to_string(pack.extID));
             extension->second->baseID = id;
@@ -956,7 +961,7 @@ namespace
         }
         for (auto* base : mains)
         {
-            if (base->extID)
+            if (base->extID && baseByExtension.contains(base->extID))
                 extensions.push_back(byID.at(base->extID));
         }
 
@@ -966,14 +971,16 @@ namespace
             plist_t item = plist_new_dict();
             std::optional<std::string_view> extURL;
             std::string resolvedExtURL;
-            if (pack->extID)
+            uint32_t extID = 0;
+            if (pack->extID && baseByExtension.contains(pack->extID))
             {
                 const auto* extension = byID.at(pack->extID);
                 resolvedExtURL = !pack->extURL.empty() ? pack->extURL : extension->itemURL;
                 extURL = resolvedExtURL;
+                extID = pack->extID;
             }
             SetCatalogCommon(item, *pack, pack->name, pack->artist, pack->itemURL,
-                             pack->extID, extURL, pack->extendFlag, pack->holdFlag, pack->iTunesURL);
+                             extID, extURL, pack->extendFlag, pack->holdFlag, pack->iTunesURL);
             plist_array_append_item(root.get(), item);
         }
         for (auto* extension : extensions)
@@ -1385,9 +1392,10 @@ namespace bmt
     static void ExportPacksImpl(PackTable& packs,
                                 const std::vector<Playlist>* playlists,
                                 const fs::path& outputDirectory,
-                                const bmt::ExportOptions& options)
+                                const bmt::ExportOptions& options,
+                                std::vector<Diagnostic>& warnings)
     {
-        const auto catalog = BuildOfficialCatalog(packs);
+        const auto catalog = BuildOfficialCatalog(packs, warnings);
         const auto playlistData = playlists ? BuildOfficialPlaylists(*playlists) : std::vector<uint8_t>{};
         for (auto& [id, instances] : packs)
         {
@@ -1426,6 +1434,6 @@ namespace bmt
                      const fs::path& outputDirectory,
                      const ExportOptions& options)
     {
-        ExportPacksImpl(result.packs, &result.playlists, outputDirectory, options);
+        ExportPacksImpl(result.packs, &result.playlists, outputDirectory, options, result.warnings);
     }
 }

@@ -286,6 +286,25 @@ int main()
     assert(playlistXML.find("<string>JBHot songs</string>") != std::string::npos);
     assert(playlistXML.find("<string>playlist-id</string>") != std::string::npos);
 
+    bmt::LoadResult danglingExtension;
+    bmt::MusicPack danglingBase;
+    danglingBase.originalID = danglingBase.id = 123456795;
+    danglingBase.extID = 123456796;
+    danglingBase.name = "Missing Extension Song";
+    danglingBase.artist = "Missing Extension Artist";
+    danglingBase.sourcePath = "/hot/123456795.jbt";
+    danglingExtension.packs[danglingBase.id].push_back(std::move(danglingBase));
+    const auto danglingOutput = output / "dangling-export";
+    bmt::ExportPacks(danglingExtension, danglingOutput);
+    assert(danglingExtension.warnings.size() == 1);
+    assert(danglingExtension.warnings.front().message.find("123456796") != std::string::npos);
+    assert(std::filesystem::is_regular_file(danglingOutput / "123456795.jbt"));
+    const auto danglingCatalog = bmt::LoadOfficialCatalog(danglingOutput / "mulist.plist");
+    assert(danglingCatalog.size() == 1);
+    assert(danglingCatalog.front().id == 123456795);
+    assert(danglingCatalog.front().extID == 0);
+    assert(danglingCatalog.front().extURL.empty());
+
     const auto secondCustomDirectory = output / "custom-two";
     std::filesystem::create_directory(secondCustomDirectory);
     bool rejectedOverlappingRanges = false;

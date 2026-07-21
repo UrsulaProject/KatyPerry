@@ -148,6 +148,7 @@ namespace bmt
         std::vector<CatalogEntry> catalog;
         std::vector<Playlist> playlists;
         std::vector<Diagnostic> diagnostics;
+        std::vector<Diagnostic> warnings;
         size_t droppedDuplicates = 0;
     };
 

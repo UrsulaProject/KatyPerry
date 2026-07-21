@@ -210,7 +210,11 @@ int main(int argc, char** argv)
         }
         if (exportDirectory)
         {
+            const size_t warningStart = result.warnings.size();
             bmt::ExportPacks(result, *exportDirectory, exportOptions);
+            for (size_t index = warningStart; index < result.warnings.size(); ++index)
+                std::cerr << "warning: " << result.warnings[index].path << ": "
+                          << result.warnings[index].message << '\n';
             std::cout << "exported to " << *exportDirectory << '\n';
         }
         return result.diagnostics.empty() ? 0 : 2;
