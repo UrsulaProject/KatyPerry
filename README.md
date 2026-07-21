@@ -33,6 +33,7 @@ Load JBHot packs:
 ```sh
 ./build/BemaniTools load \
   --jbhot-plist /path/to/jp.konmai.jbhot2.T2SSHXUSCG.plist \
+  --server-data /path/to/serverData.json \
   /path/to/jbhot-packs
 ```
 
@@ -41,10 +42,15 @@ Resolve conflicts and export BF-encrypted JBTs plus a plaintext official-format 
 ```sh
 ./build/BemaniTools load \
   --jbhot-plist /path/to/jbhot-defaults.plist \
+  --server-data /path/to/serverData.json \
   --resolve 600000000 899999999 \
   --export /path/to/output \
   /path/to/official-packs /path/to/jbhot-packs
 ```
+
+When `--server-data` is present, JBHot playlists are exported as an official-format
+`playlists.plist`. Playlist music IDs follow the JBHot pack instance when conflict
+resolution assigns that instance a new ID.
 
 The library API is declared in `include/Bemani/JBT.h`. `LoadPacks` returns
 `std::map<uint32_t, std::vector<MusicPack>>`; lazy loading is the default and eager loading is available through `LoadOptions`.

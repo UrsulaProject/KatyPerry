@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <vector>
 
@@ -56,6 +57,31 @@ int main()
     assert(pairRemaps.size() == 2);
     assert(paired.at(600000000).front().extID == 600000001);
     assert(paired.at(600000001).front().baseID == 600000000);
+
+    bmt::LoadResult playlistConflict;
+    bmt::MusicPack officialBase;
+    officialBase.originalID = officialBase.id = 100;
+    officialBase.sourcePath = "/official/000000100.jbt";
+    officialBase.catalogSource = bmt::CatalogSource::Official;
+    bmt::MusicPack hotBase = officialBase;
+    hotBase.sourcePath = "/hot/000000100.jbt";
+    hotBase.catalogSource = bmt::CatalogSource::JBHot;
+    hotBase.extID = 200;
+    bmt::MusicPack officialExtension;
+    officialExtension.originalID = officialExtension.id = 200;
+    officialExtension.sourcePath = "/official/000000200.jbt";
+    officialExtension.catalogSource = bmt::CatalogSource::Official;
+    bmt::MusicPack hotExtension = officialExtension;
+    hotExtension.sourcePath = "/hot/000000200.jbt";
+    hotExtension.catalogSource = bmt::CatalogSource::JBHot;
+    hotExtension.baseID = 100;
+    playlistConflict.packs[100] = {officialBase, hotBase};
+    playlistConflict.packs[200] = {officialExtension, hotExtension};
+    playlistConflict.playlists.push_back({"playlist-id", "JBHot songs", {100, 200, 999}});
+    const auto playlistRemaps = bmt::ResolveConflicts(playlistConflict, {600000000, 600000010});
+    assert(playlistRemaps.size() == 2);
+    assert(playlistConflict.playlists.front().musicIDs ==
+           (std::vector<uint32_t>{600000000, 600000001, 999}));
 
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path output = std::filesystem::temp_directory_path() /
@@ -156,14 +182,35 @@ int main()
         musicData
             << R"({"data":{"123456792":{"id":123456792,"title":"Paired Song","artist":"Paired Artist","extendId":123456793,"extendFlag":0,"holdFlag":0},"123456793":{"id":123456793,"title":"Paired Song [ 2 ]","artist":"Paired Artist","origId":123456792,"extendId":0,"extendFlag":7,"holdFlag":7}}})";
     }
+    const auto serverDataPath = output / "serverData.json";
+    {
+        std::ofstream serverData(serverDataPath);
+        serverData
+            << R"({"data":{"playlist":[{"id":"playlist-id","list":[123456792,123456793,42],"name":"Test Playlist"}]}})";
+    }
     auto hotLoaded = bmt::LoadPacks({hotDirectory}, {
         .mode = bmt::LoadMode::Eager,
         .failureMode = bmt::FailureMode::Strict,
         .musicDataJson = musicDataPath,
+        .serverDataJson = serverDataPath,
     });
     assert(hotLoaded.packs.at(123456792).front().extID == 123456793);
     assert(hotLoaded.packs.at(123456793).front().baseID == 123456792);
-    bmt::ExportPacks(hotLoaded.packs, output / "hot-export");
+    assert(hotLoaded.playlists.size() == 1);
+    assert(hotLoaded.playlists.front().musicIDs ==
+           (std::vector<uint32_t>{123456792, 123456793, 42}));
+    bmt::ExportPacks(hotLoaded, output / "hot-export");
+    assert(std::filesystem::is_regular_file(output / "hot-export" / "playlists.plist"));
+    std::ifstream playlistInput(output / "hot-export" / "playlists.plist");
+    const std::string playlistXML((std::istreambuf_iterator<char>(playlistInput)),
+                                  std::istreambuf_iterator<char>());
+    const auto listPosition = playlistXML.find("<key>LIST</key>");
+    const auto namePosition = playlistXML.find("<key>NAME</key>");
+    const auto idPositionInPlaylist = playlistXML.find("<key>PLID</key>");
+    assert(listPosition < namePosition && namePosition < idPositionInPlaylist);
+    assert(playlistXML.find("<integer>123456792</integer>") != std::string::npos);
+    assert(playlistXML.find("<string>Test Playlist</string>") != std::string::npos);
+    assert(playlistXML.find("<string>playlist-id</string>") != std::string::npos);
     const auto hotReloaded = bmt::LoadPacks({output / "hot-export"}, {
         .mode = bmt::LoadMode::Eager,
         .failureMode = bmt::FailureMode::Strict,

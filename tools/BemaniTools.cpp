@@ -34,9 +34,10 @@ namespace
             << "  --strict                   stop on the first invalid pack\n"
             << "  --jbhot-plist <path>       JBHot NSUserDefaults plist\n"
             << "  --music-json <path>        decrypted JBHot musicData JSON\n"
+            << "  --server-data <path>       decrypted JBHot serverData JSON\n"
             << "  --catalog <path>           official plaintext mulist plist\n"
             << "  --resolve <first> <last>   resolve duplicate IDs in this range\n"
-            << "  --export <directory>       write encrypted JBTs and mulist.plist\n";
+            << "  --export <directory>       write JBTs, mulist.plist, and playlists.plist\n";
     }
 
     uint32_t ParseID(const char* text)
@@ -95,6 +96,7 @@ int main(int argc, char** argv)
             else if (argument == "--strict") options.failureMode = bmt::FailureMode::Strict;
             else if (argument == "--jbhot-plist") options.jbhotDefaultsPlist = requireValue();
             else if (argument == "--music-json") options.musicDataJson = requireValue();
+            else if (argument == "--server-data") options.serverDataJson = requireValue();
             else if (argument == "--catalog") options.catalogPlist = requireValue();
             else if (argument == "--export") exportDirectory = requireValue();
             else if (argument == "--resolve")
@@ -125,18 +127,19 @@ int main(int argc, char** argv)
         }
         std::cout << "loaded " << instances << " packs in " << result.packs.size()
                   << " ID groups; conflicts=" << conflicts
+                  << "; playlists=" << result.playlists.size()
                   << "; diagnostics=" << result.diagnostics.size() << '\n';
         for (const auto& diagnostic : result.diagnostics)
             std::cerr << diagnostic.path << ": " << diagnostic.message << '\n';
 
         if (resolve || exportDirectory)
         {
-            const auto remaps = bmt::ResolveConflicts(result.packs, resolveOptions);
+            const auto remaps = bmt::ResolveConflicts(result, resolveOptions);
             std::cout << "remapped " << remaps.size() << " packs\n";
         }
         if (exportDirectory)
         {
-            bmt::ExportPacks(result.packs, *exportDirectory);
+            bmt::ExportPacks(result, *exportDirectory);
             std::cout << "exported to " << *exportDirectory << '\n';
         }
         return result.diagnostics.empty() ? 0 : 2;

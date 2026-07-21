@@ -38,6 +38,13 @@ namespace bmt
         Strict,
     };
 
+    enum class CatalogSource
+    {
+        None,
+        Official,
+        JBHot,
+    };
+
     struct PackResource
     {
         std::string name;
@@ -70,6 +77,7 @@ namespace bmt
         uint32_t id = 0;
         std::filesystem::path sourcePath;
         PackFormat format = PackFormat::Plain;
+        CatalogSource catalogSource = CatalogSource::None;
         InfoRevision infoRevision = InfoRevision::InfoV2;
         std::string infoMember;
         std::string name;
@@ -93,6 +101,13 @@ namespace bmt
 
     using PackTable = std::map<uint32_t, std::vector<MusicPack>>;
 
+    struct Playlist
+    {
+        std::string id;
+        std::string name;
+        std::vector<uint32_t> musicIDs;
+    };
+
     struct Diagnostic
     {
         std::filesystem::path path;
@@ -105,6 +120,7 @@ namespace bmt
         FailureMode failureMode = FailureMode::Continue;
         std::optional<std::filesystem::path> jbhotDefaultsPlist;
         std::optional<std::filesystem::path> musicDataJson;
+        std::optional<std::filesystem::path> serverDataJson;
         std::optional<std::filesystem::path> catalogPlist;
     };
 
@@ -112,6 +128,7 @@ namespace bmt
     {
         PackTable packs;
         std::vector<CatalogEntry> catalog;
+        std::vector<Playlist> playlists;
         std::vector<Diagnostic> diagnostics;
     };
 
@@ -132,9 +149,13 @@ namespace bmt
                          const LoadOptions& options = {});
     std::vector<IDRemap> ResolveConflicts(PackTable& packs,
                                           const ResolveOptions& options = {});
+    std::vector<IDRemap> ResolveConflicts(LoadResult& result,
+                                          const ResolveOptions& options = {});
     void ExportPacks(PackTable& packs, const std::filesystem::path& outputDirectory);
+    void ExportPacks(LoadResult& result, const std::filesystem::path& outputDirectory);
 
     std::vector<CatalogEntry> LoadOfficialCatalog(const std::filesystem::path& plistPath);
+    std::vector<Playlist> LoadJBHotPlaylists(const std::filesystem::path& serverDataJson);
     std::vector<uint8_t> DecryptOfficialMusicList(const std::filesystem::path& encryptedPath,
                                                   const std::filesystem::path& keychainDump,
                                                   std::string_view bundleID = "jp.konami.jubeatplus");
