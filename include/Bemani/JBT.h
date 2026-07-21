@@ -163,6 +163,7 @@ namespace bmt
     {
         bool encryptJBT = true;
         std::optional<std::string> mulistKey;
+        bool separateByDLC = false;
     };
 
     struct IDRemap

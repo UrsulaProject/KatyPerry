@@ -351,6 +351,23 @@ int main()
                        }));
     assert(reloadedPlaylists.back().musicIDs == (std::vector<uint32_t>{100, 200}));
 
+    const auto separateOutput = output / "separate-export";
+    bmt::ExportPacks(playlistConflict, separateOutput, {.separateByDLC = true});
+    assert(std::filesystem::is_regular_file(separateOutput / "official" / "000000100.jbt"));
+    assert(std::filesystem::is_regular_file(separateOutput / "official" / "000000200.jbt"));
+    assert(std::filesystem::is_regular_file(separateOutput / "jbhot" / "600000000.jbt"));
+    assert(std::filesystem::is_regular_file(separateOutput / "jbhot" / "600000001.jbt"));
+    assert(!std::filesystem::exists(separateOutput / "000000100.jbt"));
+    assert(std::filesystem::is_regular_file(separateOutput / "mulist.plist"));
+    assert(std::filesystem::is_regular_file(separateOutput / "playlists.plist"));
+
+    const auto separateCustomOutput = output / "separate-custom-export";
+    bmt::ExportPacks(exportResult, separateCustomOutput, {.separateByDLC = true});
+    assert(std::filesystem::is_regular_file(
+        separateCustomOutput / "custom-1" / "123456789.jbt"));
+    assert(!std::filesystem::exists(separateCustomOutput / "123456789.jbt"));
+    assert(std::filesystem::is_regular_file(separateCustomOutput / "mulist.plist"));
+
     bmt::LoadResult danglingExtension;
     bmt::MusicPack danglingBase;
     danglingBase.originalID = danglingBase.id = 123456795;

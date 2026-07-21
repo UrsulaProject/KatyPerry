@@ -49,6 +49,7 @@ DLC must be followed by its own non-overlapping allocation range:
   --custom-dir=/path/to/custom-two --custom-range=2211,2300 \
   --resolve 600000000 899999999 \
   --encrypt-jbt=true \
+  --separate-output \
   --mulist-key=SHARED_KEY \
   --export /path/to/output
 ```
@@ -58,6 +59,12 @@ Exported JBT members use the official BF encryption by default; pass
 plaintext. When `--mulist-key` is present, the exporter additionally writes an
 official BF-encrypted `mulist`, deriving the codec key from the supplied raw key
 and prepending four random bytes before the plist as the game expects.
+
+With `--separate-output`, JBTs are grouped by input DLC under `official/`,
+`jbhot/`, and `custom-1/`, `custom-2/`, ... in Custom command-line order.
+The merged `mulist`, `mulist.plist`, and `playlists.plist` remain in the output
+root. This organized layout is intended for staging; the game itself expects
+the JBT files directly in its `Documents` directory.
 
 An Official DLC companion `playlists.plist` is merged before the playlists from
 JBHot `serverData`. Conflict resolution remaps only the JBHot playlist IDs. Use

@@ -1567,9 +1567,44 @@ namespace bmt
             }
         }
         fs::create_directories(outputDirectory);
+
+        std::set<size_t> customOrders;
+        if (options.separateByDLC)
+        {
+            for (const auto& [id, instances] : packs)
+            {
+                const auto& pack = instances.front();
+                if (pack.dlcType == DLCType::Custom)
+                    customOrders.insert(pack.dlcOrder);
+            }
+        }
+        std::map<size_t, size_t> customNumbers;
+        size_t nextCustomNumber = 1;
+        for (const auto order : customOrders)
+            customNumbers.emplace(order, nextCustomNumber++);
+
+        const auto packOutputDirectory = [&](const MusicPack& pack)
+        {
+            if (!options.separateByDLC)
+                return outputDirectory;
+            switch (pack.dlcType)
+            {
+            case DLCType::Official:
+                return outputDirectory / "official";
+            case DLCType::JBHot:
+                return outputDirectory / "jbhot";
+            case DLCType::Custom:
+                return outputDirectory /
+                       (std::string("custom-") + std::to_string(customNumbers.at(pack.dlcOrder)));
+            }
+            throw std::runtime_error("unsupported DLC type");
+        };
+
         for (auto& [id, instances] : packs)
         {
-            WriteJBT(instances.front(), outputDirectory / PackFileName(id), options.encryptJBT);
+            const auto directory = packOutputDirectory(instances.front());
+            fs::create_directories(directory);
+            WriteJBT(instances.front(), directory / PackFileName(id), options.encryptJBT);
         }
         WriteFile(outputDirectory / "mulist.plist", catalog);
         if (options.mulistKey)

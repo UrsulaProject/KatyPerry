@@ -43,6 +43,7 @@ namespace
             << "  --resolve <first> <last>   JBHot conflict ID range\n"
             << "  --export <directory>       write JBTs, mulist.plist, and playlists.plist\n"
             << "  --encrypt-jbt=true|false   encrypt output JBT members (default: true)\n"
+            << "  --separate-output          place JBTs in per-DLC subdirectories\n"
             << "  --mulist-key=<key>         also write encrypted mulist using this raw key\n"
             << "  --playlist-export <path>   write merged playlists.plist without exporting JBTs\n";
     }
@@ -156,6 +157,7 @@ int main(int argc, char** argv)
             else if (argument == "--catalog") options.catalogPlist = requireValue();
             else if (argument == "--export") exportDirectory = requireValue();
             else if (argument == "--playlist-export") playlistExport = requireValue();
+            else if (argument == "--separate-output") exportOptions.separateByDLC = true;
             else if (argument.starts_with("--encrypt-jbt="))
                 exportOptions.encryptJBT = ParseBoolean(std::string_view(argument).substr(14));
             else if (argument.starts_with("--mulist-key="))
