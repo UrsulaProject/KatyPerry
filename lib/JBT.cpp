@@ -695,6 +695,50 @@ namespace
         if (entry.originalID) pack.baseID = entry.originalID;
     }
 
+    void NormalizePackRelationships(bmt::PackTable& packs)
+    {
+        for (auto& [id, instances] : packs)
+        {
+            for (auto& pack : instances)
+            {
+                if (!pack.baseID)
+                    continue;
+                const auto bases = packs.find(pack.baseID);
+                if (bases == packs.end())
+                    continue;
+                for (auto& base : bases->second)
+                {
+                    if (base.dlcType == pack.dlcType && base.dlcOrder == pack.dlcOrder)
+                    {
+                        if (!base.extID)
+                            base.extID = id;
+                        break;
+                    }
+                }
+            }
+        }
+        for (auto& [id, instances] : packs)
+        {
+            for (auto& pack : instances)
+            {
+                if (!pack.extID)
+                    continue;
+                const auto extensions = packs.find(pack.extID);
+                if (extensions == packs.end())
+                    continue;
+                for (auto& extension : extensions->second)
+                {
+                    if (extension.dlcType == pack.dlcType && extension.dlcOrder == pack.dlcOrder)
+                    {
+                        if (!extension.baseID)
+                            extension.baseID = id;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     void ApplyCatalog(bmt::LoadResult& result,
                       const std::vector<bmt::CatalogEntry>& explicitCatalog,
                       const std::unordered_map<size_t, CatalogMap>& catalogsByDLC,
@@ -729,28 +773,7 @@ namespace
             }
         }
 
-        std::unordered_map<uint32_t, uint32_t> extToBase;
-        for (const auto& [id, instances] : result.packs)
-        {
-            for (const auto& pack : instances)
-            {
-                if (pack.extID)
-                    extToBase[pack.extID] = id;
-                if (pack.baseID)
-                    extToBase[id] = pack.baseID;
-            }
-        }
-        for (auto& [id, instances] : result.packs)
-        {
-            if (const auto base = extToBase.find(id); base != extToBase.end())
-            {
-                for (auto& pack : instances)
-                {
-                    if (!pack.baseID)
-                        pack.baseID = base->second;
-                }
-            }
-        }
+        NormalizePackRelationships(result.packs);
     }
 
     uint32_t AllocateID(uint32_t& next,
@@ -1208,6 +1231,7 @@ namespace bmt
             throw std::invalid_argument("invalid reserved conflict ID range");
 
         auto& packs = result.packs;
+        NormalizePackRelationships(packs);
         std::vector<MusicPack> flat;
         std::vector<uint32_t> oldIDs;
         std::unordered_map<uint32_t, std::vector<size_t>> byOriginalID;

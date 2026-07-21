@@ -132,6 +132,16 @@ int main()
     assert(mixedPair.packs.at(600000000).front().extID == 600000001);
     assert(mixedPair.packs.at(600000001).front().baseID == 600000000);
 
+    bmt::LoadResult reverseOnlyPair;
+    bmt::MusicPack reverseBase = baseOne;
+    reverseBase.extID = 0;
+    bmt::MusicPack reverseExtension = extOne;
+    reverseOnlyPair.packs[100] = {reverseBase};
+    reverseOnlyPair.packs[200] = {reverseExtension};
+    assert(bmt::ResolveConflicts(reverseOnlyPair).empty());
+    assert(reverseOnlyPair.packs.at(100).front().extID == 200);
+    assert(reverseOnlyPair.packs.at(200).front().baseID == 100);
+
     bmt::LoadResult identical;
     bmt::MusicPack identicalOfficial = first;
     bmt::MusicPack identicalHot = first;
