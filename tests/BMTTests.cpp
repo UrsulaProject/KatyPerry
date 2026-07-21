@@ -1,7 +1,10 @@
 #include <Bemani/BFContainer.h>
 #include <Bemani/JBT.h>
 
+#include <openssl/evp.h>
+
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -21,6 +24,19 @@ namespace
         if (!input)
             throw std::runtime_error("cannot open test file " + path.string());
         return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    }
+
+    bool HasJBTDigest(const std::filesystem::path& path)
+    {
+        const auto bytes = ReadBytes(path);
+        if (bytes.size() < 16)
+            return false;
+        std::array<uint8_t, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digestLength = 0;
+        if (EVP_Digest(bytes.data(), bytes.size() - 16, digest.data(), &digestLength,
+                       EVP_md5(), nullptr) != 1 || digestLength != 16)
+            return false;
+        return std::equal(digest.begin(), digest.begin() + 16, bytes.end() - 16);
     }
 
     void SetContent(bmt::MusicPack& pack, std::initializer_list<uint8_t> bytes)
@@ -264,6 +280,9 @@ int main()
     assert(loaded.packs.contains(123456789));
     assert(loaded.packs.at(123456789).front().resources.at("seq_bas").Data() ==
            (std::vector<uint8_t>{'J', 'B', 'S', 'Q', 1, 2, 3, 4, 5}));
+    assert(loaded.packs.at(123456789).front().resources.at("infov2").Data() ==
+           std::vector<uint8_t>(info.begin(), info.end()));
+    assert(HasJBTDigest(output / "123456789.jbt"));
     assert(loaded.packs.contains(123456790));
     assert(loaded.packs.at(123456790).front().infoRevision == bmt::InfoRevision::InfoV3);
     assert(loaded.packs.at(123456791).front().infoRevision == bmt::InfoRevision::InfoV2);
@@ -293,6 +312,7 @@ int main()
         {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
     assert(plaintextLoaded.packs.size() == 5);
     assert(plaintextLoaded.packs.at(123456789).front().format == bmt::PackFormat::Plain);
+    assert(HasJBTDigest(plaintextOutput / "123456789.jbt"));
     assert(plaintextLoaded.packs.at(123456789).front().resources.at("seq_bas").Data() ==
            loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
 

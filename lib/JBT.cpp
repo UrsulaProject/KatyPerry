@@ -833,6 +833,9 @@ namespace
 
     void RewriteInfoID(bmt::MusicPack& pack)
     {
+        if (pack.id == pack.originalID && !pack.infoMember.empty() &&
+            pack.resources.contains(pack.infoMember))
+            return;
         if (pack.infoMember.empty())
         {
             pack.infoRevision = bmt::InfoRevision::InfoV2;
@@ -878,6 +881,22 @@ namespace
         return stream.str();
     }
 
+    void AppendJBTDigest(const fs::path& path)
+    {
+        const auto bytes = ReadFile(path);
+        std::array<uint8_t, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digestLength = 0;
+        if (EVP_Digest(bytes.data(), bytes.size(), digest.data(), &digestLength,
+                       EVP_md5(), nullptr) != 1 || digestLength != 16)
+            throw std::runtime_error("cannot calculate output JBT digest");
+        std::ofstream output(path, std::ios::binary | std::ios::app);
+        if (!output)
+            throw std::runtime_error("cannot append output JBT digest to " + path.string());
+        output.write(reinterpret_cast<const char*>(digest.data()), digestLength);
+        if (!output)
+            throw std::runtime_error("cannot write output JBT digest to " + path.string());
+    }
+
     void WriteJBT(bmt::MusicPack& pack, const fs::path& path, bool encrypt)
     {
         RewriteInfoID(pack);
@@ -916,6 +935,7 @@ namespace
         if (zip_close(archive.get()) != 0)
             throw std::runtime_error("cannot finalize output JBT " + path.string());
         archive.release();
+        AppendJBTDigest(path);
     }
 
     void SetCatalogCommon(plist_t dictionary,
