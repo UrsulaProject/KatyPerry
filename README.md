@@ -78,16 +78,14 @@ and `version`. `marker build` writes this plaintext form so an injected tweak ca
 load it and pass the array directly to the game's `+[MarkerManager setMarkerList:]`.
 An integration example is provided in `ios/MarkerListLoaderExample.xm`.
 
-The standalone conversion commands remain available for inspecting or rebuilding
-an encrypted `PrefMarkerInfoList`. Both raw NSData and Base64 encodings are
-supported, but direct in-process installation is preferred because the game then
-uses its own `NSKeyedArchiver` and BFCodec implementation.
+The standalone decrypt command remains available for inspecting an existing
+encrypted `PrefMarkerInfoList`. BemaniTools deliberately does not rebuild this
+archive; installation goes through the game's own `NSKeyedArchiver` and BFCodec
+implementation.
 
 ```sh
 ./build/BemaniTools marker-list decrypt \
   --input PrefMarkerInfoList --output marker-list.plist
-./build/BemaniTools marker-list encrypt \
-  --input marker-list.plist --output PrefMarkerInfoList --format raw
 ```
 
 Exported music JBTs and marker ZIP members use official BF encryption. Runtime

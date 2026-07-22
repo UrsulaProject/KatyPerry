@@ -78,7 +78,7 @@ namespace
             << "  jbt decrypt|encrypt|unpack|pack|unpack-dir|pack-dir\n"
             << "  jbhot defaults-dump\n"
             << "  marker decrypt|encrypt|unpack|pack|unpack-dir|pack-dir|build\n"
-            << "  marker-list decrypt|encrypt\n"
+            << "  marker-list decrypt\n"
             << "\nUse BemaniTools <group> <command> --help for command options.\n";
     }
 
@@ -322,33 +322,22 @@ namespace
     int RunMarkerList(std::string_view command,
                       const std::vector<std::string>& arguments)
     {
+        if (command != "decrypt")
+            throw std::runtime_error("unknown marker-list command " + std::string(command));
         fs::path input;
         fs::path output;
-        std::string format = "raw";
         po::options_description options("marker-list " + std::string(command) + " options");
         options.add_options()
             ("help,h", "show help")
             ("input,i", po::value<fs::path>(&input)->required(), "input file")
-            ("output,o", po::value<fs::path>(&output)->required(), "output file")
-            ("format", po::value<std::string>(&format)->default_value("raw"), "raw or base64 for encrypt");
+            ("output,o", po::value<fs::path>(&output)->required(), "output XML plist");
         const auto values = Parse(arguments, options);
         if (values.count("help"))
         {
             std::cout << options << '\n';
             return 0;
         }
-        if (command == "decrypt")
-            WriteFile(output, bmt::BuildMarkerListXML(bmt::DecryptMarkerList(input)));
-        else if (command == "encrypt")
-        {
-            if (format != "raw" && format != "base64")
-                throw std::runtime_error("--format must be raw or base64");
-            WriteFile(output, bmt::EncryptMarkerList(bmt::LoadMarkerListXML(input),
-                format == "raw" ? bmt::MarkerListEncoding::Raw
-                                : bmt::MarkerListEncoding::Base64));
-        }
-        else
-            throw std::runtime_error("unknown marker-list command " + std::string(command));
+        WriteFile(output, bmt::BuildMarkerListXML(bmt::DecryptMarkerList(input)));
         return 0;
     }
 }

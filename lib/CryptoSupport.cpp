@@ -51,21 +51,6 @@ namespace bmt::detail
         return output;
     }
 
-    std::string Base64Encode(std::span<const uint8_t> data)
-    {
-        if (data.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
-            throw std::runtime_error("data is too large for Base64");
-        std::string output(((data.size() + 2) / 3) * 4, '\0');
-        if (data.empty())
-            return output;
-        const int size = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(output.data()),
-                                         data.data(), static_cast<int>(data.size()));
-        if (size < 0)
-            throw std::runtime_error("Base64 encoding failed");
-        output.resize(static_cast<size_t>(size));
-        return output;
-    }
-
     std::vector<uint8_t> AESDecrypt(std::span<const uint8_t> ciphertext,
                                     std::span<const uint8_t> key,
                                     std::span<const uint8_t> iv,

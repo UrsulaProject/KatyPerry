@@ -543,12 +543,6 @@ int main()
     assert(markerEntries.front().bannerName == "tm0048_banner");
     assert(markerEntries.front().version == "1.0.0");
     assert(bmt::LoadMarkerListXML(markerListXML).front().markerID == "mk0048");
-    const auto markerListBase64 = bmt::EncryptMarkerList(
-        markerEntries, bmt::MarkerListEncoding::Base64);
-    const auto markerListBase64Path = markerRoot / "PrefMarkerInfoList.base64";
-    WriteBytes(markerListBase64Path, markerListBase64);
-    assert(bmt::DecryptMarkerList(markerListBase64Path).front().markerID == "mk0048");
-
     const auto duplicateMarkers = markerRoot / "duplicates";
     std::filesystem::create_directories(duplicateMarkers / "banner");
     std::filesystem::copy_file(markerOfficial / "mk0048.zip", duplicateMarkers / "mk0048.zip");

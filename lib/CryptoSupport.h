@@ -13,7 +13,6 @@
 namespace bmt::detail
 {
     std::vector<uint8_t> Base64Decode(std::string_view encoded);
-    std::string Base64Encode(std::span<const uint8_t> data);
     std::vector<uint8_t> AESDecrypt(std::span<const uint8_t> ciphertext,
                                     std::span<const uint8_t> key,
                                     std::span<const uint8_t> iv,

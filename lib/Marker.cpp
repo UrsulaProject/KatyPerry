@@ -31,7 +31,6 @@ namespace
     constexpr std::string_view JBHotMarkerPassword = "myR8PfjD";
 
     using bmt::detail::Base64Decode;
-    using bmt::detail::Base64Encode;
     using bmt::detail::ParsePlist;
     using bmt::detail::PlistPtr;
     using bmt::detail::PlistString;
@@ -233,69 +232,6 @@ namespace
         if (index >= plist_array_get_size(objects))
             throw std::runtime_error("NSKeyedArchiver UID is outside $objects");
         return plist_array_get_item(objects, static_cast<uint32_t>(index));
-    }
-
-    std::vector<uint8_t> BuildMarkerArchive(const std::vector<bmt::MarkerListEntry>& entries)
-    {
-        const uint64_t dictionaryClass = 2 + entries.size() * 7;
-        const uint64_t arrayClass = dictionaryClass + 1;
-        PlistPtr root(plist_new_dict());
-        plist_dict_set_item(root.get(), "$archiver", plist_new_string("NSKeyedArchiver"));
-        plist_dict_set_item(root.get(), "$version", plist_new_uint(100000));
-        plist_t objects = plist_new_array();
-        plist_array_append_item(objects, plist_new_string("$null"));
-
-        plist_t arrayObject = plist_new_dict();
-        plist_dict_set_item(arrayObject, "$class", plist_new_uid(arrayClass));
-        plist_t arrayItems = plist_new_array();
-        for (size_t index = 0; index < entries.size(); ++index)
-            plist_array_append_item(arrayItems, plist_new_uid(2 + index * 7));
-        plist_dict_set_item(arrayObject, "NS.objects", arrayItems);
-        plist_array_append_item(objects, arrayObject);
-
-        for (size_t index = 0; index < entries.size(); ++index)
-        {
-            const auto& entry = entries[index];
-            const uint64_t base = 2 + index * 7;
-            plist_t dictionary = plist_new_dict();
-            plist_dict_set_item(dictionary, "$class", plist_new_uid(dictionaryClass));
-            plist_t keys = plist_new_array();
-            plist_t values = plist_new_array();
-            for (uint64_t offset = 1; offset <= 3; ++offset)
-                plist_array_append_item(keys, plist_new_uid(base + offset));
-            for (uint64_t offset = 4; offset <= 6; ++offset)
-                plist_array_append_item(values, plist_new_uid(base + offset));
-            plist_dict_set_item(dictionary, "NS.keys", keys);
-            plist_dict_set_item(dictionary, "NS.objects", values);
-            plist_array_append_item(objects, dictionary);
-            plist_array_append_item(objects, plist_new_string("version"));
-            plist_array_append_item(objects, plist_new_string("bannerName"));
-            plist_array_append_item(objects, plist_new_string("markerID"));
-            plist_array_append_item(objects, plist_new_string(entry.version.c_str()));
-            plist_array_append_item(objects, plist_new_string(entry.bannerName.c_str()));
-            plist_array_append_item(objects, plist_new_string(entry.markerID.c_str()));
-        }
-
-        plist_t dictClass = plist_new_dict();
-        plist_t dictClasses = plist_new_array();
-        plist_array_append_item(dictClasses, plist_new_string("NSDictionary"));
-        plist_array_append_item(dictClasses, plist_new_string("NSObject"));
-        plist_dict_set_item(dictClass, "$classes", dictClasses);
-        plist_dict_set_item(dictClass, "$classname", plist_new_string("NSDictionary"));
-        plist_array_append_item(objects, dictClass);
-
-        plist_t listClass = plist_new_dict();
-        plist_t listClasses = plist_new_array();
-        plist_array_append_item(listClasses, plist_new_string("NSArray"));
-        plist_array_append_item(listClasses, plist_new_string("NSObject"));
-        plist_dict_set_item(listClass, "$classes", listClasses);
-        plist_dict_set_item(listClass, "$classname", plist_new_string("NSArray"));
-        plist_array_append_item(objects, listClass);
-        plist_dict_set_item(root.get(), "$objects", objects);
-        plist_t top = plist_new_dict();
-        plist_dict_set_item(top, "root", plist_new_uid(1));
-        plist_dict_set_item(root.get(), "$top", top);
-        return SerializePlist(root.get(), PLIST_FORMAT_BINARY);
     }
 
     std::vector<bmt::MarkerListEntry> ParseMarkerArchive(std::span<const uint8_t> data)
@@ -565,13 +501,4 @@ namespace bmt
         return ParseMarkerArchive(DecryptBFContainer(encrypted, MarkerListKey));
     }
 
-    std::vector<uint8_t> EncryptMarkerList(const std::vector<MarkerListEntry>& entries,
-                                           MarkerListEncoding encoding)
-    {
-        const auto encrypted = EncryptBFContainer(BuildMarkerArchive(entries), MarkerListKey);
-        if (encoding == MarkerListEncoding::Raw)
-            return encrypted;
-        const auto base64 = Base64Encode(encrypted);
-        return {base64.begin(), base64.end()};
-    }
 }

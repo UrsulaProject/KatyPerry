@@ -66,12 +66,6 @@ namespace bmt
         size_t droppedDuplicates = 0;
     };
 
-    enum class MarkerListEncoding
-    {
-        Raw,
-        Base64,
-    };
-
     struct MarkerExportOptions
     {
         std::optional<std::filesystem::path> markerListOutput;
@@ -99,8 +93,6 @@ namespace bmt
     std::vector<MarkerListEntry> LoadMarkerListXML(const std::filesystem::path& path);
     std::vector<uint8_t> BuildMarkerListXML(const std::vector<MarkerListEntry>& entries);
     std::vector<MarkerListEntry> DecryptMarkerList(const std::filesystem::path& input);
-    std::vector<uint8_t> EncryptMarkerList(const std::vector<MarkerListEntry>& entries,
-                                           MarkerListEncoding encoding = MarkerListEncoding::Raw);
 }
 
 #endif
