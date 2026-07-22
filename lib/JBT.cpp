@@ -593,12 +593,7 @@ namespace
 
     void ParseInfo(bmt::MusicPack& pack, const std::vector<uint8_t>& plaintext)
     {
-        if (pack.infoRevision == bmt::InfoRevision::InfoV3 && plaintext.size() < 4)
-            throw std::runtime_error("infov3 plaintext is missing its four-byte prefix");
-        const std::span<const uint8_t> plistBytes = pack.infoRevision == bmt::InfoRevision::InfoV3
-            ? std::span<const uint8_t>(plaintext).subspan(4)
-            : std::span<const uint8_t>(plaintext);
-        auto plist = ParsePlist(plistBytes);
+        auto plist = ParsePlist(plaintext);
         if (plist_get_node_type(plist.get()) != PLIST_DICT)
             throw std::runtime_error("JBT info plist is not a dictionary");
         pack.originalID = PlistUInt(plist.get(), "ID");
@@ -624,7 +619,13 @@ namespace
         const auto format = DetectPackFormat(encryptedInfo);
         if (format == bmt::PackFormat::JBHot && musicData->empty())
             throw std::runtime_error("JBHot pack requires --jbhot-plist");
-        const auto plainInfo = DecodeResource(encryptedInfo, format, infoMember, musicData);
+        auto plainInfo = DecodeResource(encryptedInfo, format, infoMember, musicData);
+        if (revision == bmt::InfoRevision::InfoV3 && format == bmt::PackFormat::OfficialBF)
+        {
+            if (plainInfo.size() < 4)
+                throw std::runtime_error("decrypted infov3 is missing its four-byte prefix");
+            plainInfo.erase(plainInfo.begin(), plainInfo.begin() + 4);
+        }
 
         bmt::MusicPack pack;
         pack.sourcePath = path;
@@ -830,17 +831,10 @@ namespace
             generatedResource.bytes = SerializePlist(generated.get(), PLIST_FORMAT_BINARY);
             resource = pack.resources.emplace(pack.infoMember, std::move(generatedResource)).first;
         }
-        const auto& plaintext = resource->second.Data();
-        if (pack.infoRevision == bmt::InfoRevision::InfoV3 && plaintext.size() < 4)
-            throw std::runtime_error("infov3 plaintext is missing its four-byte prefix");
-        const size_t prefixLength = pack.infoRevision == bmt::InfoRevision::InfoV3 ? 4 : 0;
         plist_format_t format = PLIST_FORMAT_NONE;
-        auto plist = ParsePlist(std::span<const uint8_t>(plaintext).subspan(prefixLength), &format);
+        auto plist = ParsePlist(resource->second.Data(), &format);
         plist_dict_set_item(plist.get(), "ID", plist_new_uint(pack.id));
-        auto serialized = SerializePlist(plist.get(), format);
-        if (prefixLength)
-            serialized.insert(serialized.begin(), plaintext.begin(), plaintext.begin() + 4);
-        resource->second.bytes = std::move(serialized);
+        resource->second.bytes = SerializePlist(plist.get(), format);
         resource->second.lazyLoader = {};
     }
 
@@ -1105,7 +1099,19 @@ namespace
             if (encrypt)
             {
                 const auto key = name == "infov3" ? IOSKey : IPadKey;
-                outputMembers.push_back(bmt::EncryptBFContainer(resource.Data(), key));
+                if (name == "infov3")
+                {
+                    std::vector<uint8_t> prefixed(4);
+                    if (RAND_bytes(prefixed.data(), static_cast<int>(prefixed.size())) != 1)
+                        throw std::runtime_error("cannot generate infov3 prefix");
+                    const auto& plaintext = resource.Data();
+                    prefixed.insert(prefixed.end(), plaintext.begin(), plaintext.end());
+                    outputMembers.push_back(bmt::EncryptBFContainer(prefixed, key));
+                }
+                else
+                {
+                    outputMembers.push_back(bmt::EncryptBFContainer(resource.Data(), key));
+                }
             }
             else
             {

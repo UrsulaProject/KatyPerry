@@ -3,6 +3,7 @@
 #include <Bemani/Marker.h>
 
 #include <openssl/evp.h>
+#include <zip.h>
 
 #include <algorithm>
 #include <array>
@@ -60,6 +61,35 @@ namespace
                        EVP_md5(), nullptr) != 1 || digestLength != 16)
             return false;
         return std::equal(digest.begin(), digest.begin() + 16, bytes.end() - 16);
+    }
+
+    std::vector<uint8_t> ReadZipEntry(const std::filesystem::path& path,
+                                      const char* name)
+    {
+        int error = 0;
+        zip_t* archive = zip_open(path.c_str(), ZIP_RDONLY, &error);
+        if (!archive)
+            throw std::runtime_error("cannot open test ZIP " + path.string());
+        zip_stat_t stat{};
+        zip_stat_init(&stat);
+        if (zip_stat(archive, name, 0, &stat) != 0)
+        {
+            zip_close(archive);
+            throw std::runtime_error("cannot stat test ZIP member");
+        }
+        zip_file_t* member = zip_fopen(archive, name, 0);
+        if (!member)
+        {
+            zip_close(archive);
+            throw std::runtime_error("cannot open test ZIP member");
+        }
+        std::vector<uint8_t> bytes(static_cast<size_t>(stat.size));
+        const auto read = zip_fread(member, bytes.data(), bytes.size());
+        zip_fclose(member);
+        zip_close(archive);
+        if (read != static_cast<zip_int64_t>(bytes.size()))
+            throw std::runtime_error("cannot read test ZIP member");
+        return bytes;
     }
 
     void SetContent(bmt::MusicPack& pack, std::initializer_list<uint8_t> bytes)
@@ -162,8 +192,7 @@ int main()
     v3Info.replace(idPosition, 9, "123456790");
     bmt::PackResource v3Resource;
     v3Resource.name = "infov3";
-    v3Resource.bytes = std::vector<uint8_t>{0xde, 0xad, 0xbe, 0xef};
-    v3Resource.bytes->insert(v3Resource.bytes->end(), v3Info.begin(), v3Info.end());
+    v3Resource.bytes = std::vector<uint8_t>(v3Info.begin(), v3Info.end());
     v3Pack.resources.emplace("infov3", std::move(v3Resource));
     exportPacks[v3Pack.id].push_back(std::move(v3Pack));
 
@@ -204,6 +233,13 @@ int main()
     assert(HasJBTDigest(output / "123456789.jbt"));
     assert(loaded.packs.contains(123456790));
     assert(loaded.packs.at(123456790).front().infoRevision == bmt::InfoRevision::InfoV3);
+    assert(loaded.packs.at(123456790).front().resources.at("infov3").Data() ==
+           std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
+    const auto encryptedV3 = bmt::DecryptBFContainer(
+        ReadZipEntry(output / "123456790.jbt", "infov3"),
+        "Konami Bemani Mobile iOS");
+    assert(encryptedV3.size() == v3Info.size() + 4);
+    assert(std::equal(v3Info.begin(), v3Info.end(), encryptedV3.begin() + 4));
     assert(loaded.packs.at(123456791).front().infoRevision == bmt::InfoRevision::InfoV2);
     const auto catalog = bmt::LoadOfficialCatalog(output / "mulist.plist");
     const auto extensionEntry = std::find_if(catalog.begin(), catalog.end(), [](const auto& entry)
@@ -234,6 +270,10 @@ int main()
     assert(HasJBTDigest(plaintextOutput / "123456789.jbt"));
     assert(plaintextLoaded.packs.at(123456789).front().resources.at("seq_bas").Data() ==
            loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
+    assert(plaintextLoaded.packs.at(123456790).front().resources.at("infov3").Data() ==
+           std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
+    assert(ReadZipEntry(plaintextOutput / "123456790.jbt", "infov3") ==
+           std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
 
     const auto transformRoot = output / "jbt-transforms";
     const auto decryptedDirectory = transformRoot / "decrypted";
@@ -274,12 +314,16 @@ int main()
     bmt::UnpackJBTDirectory(batchInput, batchExpanded);
     assert(std::filesystem::is_regular_file(batchExpanded / "123456789" / "infov2"));
     assert(std::filesystem::is_regular_file(batchExpanded / "nested" / "123456790" / "infov3"));
+    assert(ReadBytes(batchExpanded / "nested" / "123456790" / "infov3") ==
+           std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
     const auto batchRepacked = transformRoot / "batch-repacked";
     bmt::PackJBTDirectory(batchExpanded, batchRepacked);
     assert(std::filesystem::is_regular_file(batchRepacked / "123456789.jbt"));
     assert(std::filesystem::is_regular_file(batchRepacked / "nested" / "123456790.jbt"));
     bmt::DecryptJBT(batchRepacked / "nested" / "123456790.jbt",
                     transformRoot / "batch-v3-plain.jbt");
+    assert(ReadZipEntry(transformRoot / "batch-v3-plain.jbt", "infov3") ==
+           std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
 
     const auto customDirectory = output / "custom";
     std::filesystem::create_directory(customDirectory);

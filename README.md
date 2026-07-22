@@ -86,7 +86,7 @@ applying BFCodec. Both raw NSData and Base64 encodings are supported.
 ```
 
 Exported music JBTs and marker ZIP members use official BF encryption. Runtime
-lists receive the original four-byte prefix: mulist and official marker frames
+formats receive their original four-byte prefix: mulist, infov3, and official marker frames
 use random bytes, while decryption normalizes the application-visible payload.
 
 Each DLC is resolved as it is loaded. If an incoming file conflicts with a
