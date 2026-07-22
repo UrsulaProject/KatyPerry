@@ -697,6 +697,12 @@ namespace bmt
                             throw std::runtime_error("marker has no banner: " + pack.bannerPath.string());
                     }
 
+                    const auto original = result.packs.find(originalID);
+                    if (original != result.packs.end() && SamePack(original->second, pack))
+                    {
+                        ++result.droppedDuplicates;
+                        continue;
+                    }
                     const auto occupied = result.packs.find(finalID);
                     if (occupied != result.packs.end())
                     {

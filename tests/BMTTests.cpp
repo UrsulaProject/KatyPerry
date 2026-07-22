@@ -516,6 +516,14 @@ int main()
     });
     assert(deduplicatedMarkers.packs.size() == 1);
     assert(deduplicatedMarkers.droppedDuplicates == 1);
+    WriteText(duplicateMarkers / "mapping.json", "{\"48\":49}\n");
+    auto mappedDuplicateMarkers = bmt::LoadMarkers({
+        {bmt::DLCType::Official, markerOfficial},
+        {bmt::DLCType::Custom, duplicateMarkers},
+    });
+    assert(mappedDuplicateMarkers.packs.size() == 1);
+    assert(mappedDuplicateMarkers.droppedDuplicates == 1);
+    assert(mappedDuplicateMarkers.remaps.empty());
 
     const auto conflictingMarkers = markerRoot / "conflicting";
     const auto conflictingExpanded = markerRoot / "conflicting-expanded";
