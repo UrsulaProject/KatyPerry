@@ -531,6 +531,17 @@ int RunTests()
     assert(bmt::DecryptOfficialMusicList(encryptedListPath, "SHARED_KEY") ==
            ReadBytes(mulistPlainPath));
 
+    const auto realIDCatalogPath = output / "real-id-catalog.plist";
+    WriteText(realIDCatalogPath,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array><dict>"
+        "<key>ID</key><real>780502690</real>"
+        "<key>Name</key><string>Real ID Song</string>"
+        "</dict></array></plist>");
+    const auto realIDCatalog = bmt::LoadOfficialCatalog(realIDCatalogPath);
+    assert(realIDCatalog.size() == 1);
+    assert(realIDCatalog.front().id == 780502690);
+
     const std::vector<uint8_t> tinyPNG = {
         0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4
     };

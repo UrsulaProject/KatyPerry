@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 #include <iomanip>
 #include <limits>
@@ -88,6 +89,15 @@ namespace
         }
         if (type == PLIST_STRING)
             return ParseUInt(PlistString(dictionary, key));
+        if (type == PLIST_REAL)
+        {
+            double number = 0;
+            plist_get_real_val(value, &number);
+            if (!std::isfinite(number) || number < 0 || number != std::floor(number) ||
+                number > std::numeric_limits<uint32_t>::max())
+                throw std::runtime_error(std::string(key) + " is outside uint32 range");
+            return static_cast<uint32_t>(number);
+        }
         return fallback;
     }
 
