@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.10)
+project(KISS VERSION 0.0.1)
+am_init("Naville")
+am_add_tweak(NAME KISS SRCS "${CMAKE_CURRENT_LIST_DIR}/Tweak.xm" NOSUBSTRATE)
+find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
+target_link_libraries(KISS PUBLIC ${FOUNDATION_LIBRARY})
