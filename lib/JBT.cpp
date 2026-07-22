@@ -520,29 +520,61 @@ namespace
         NormalizePackRelationships(result.packs);
     }
 
+    bool IsInfoMember(std::string_view name)
+    {
+        return name == "info" || name == "infov2" || name == "infov3";
+    }
+
+    struct DigestContextDeleter
+    {
+        void operator()(EVP_MD_CTX* context) const noexcept
+        {
+            EVP_MD_CTX_free(context);
+        }
+    };
+
+    using DigestContextPtr = std::unique_ptr<EVP_MD_CTX, DigestContextDeleter>;
+
+    void DigestLength(EVP_MD_CTX* context, uint64_t length)
+    {
+        std::array<uint8_t, 8> encoded{};
+        for (size_t index = 0; index < encoded.size(); ++index)
+            encoded[index] = static_cast<uint8_t>(length >> ((encoded.size() - index - 1) * 8));
+        if (EVP_DigestUpdate(context, encoded.data(), encoded.size()) != 1)
+            throw std::runtime_error("cannot update JBT content hash");
+    }
+
+    std::array<uint8_t, 32> PackContentHash(bmt::MusicPack& pack)
+    {
+        DigestContextPtr context(EVP_MD_CTX_new());
+        if (!context || EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) != 1)
+            throw std::runtime_error("cannot initialize JBT content hash");
+        for (auto& [name, resource] : pack.resources)
+        {
+            if (IsInfoMember(name))
+                continue;
+            DigestLength(context.get(), name.size());
+            if (EVP_DigestUpdate(context.get(), name.data(), name.size()) != 1)
+                throw std::runtime_error("cannot update JBT content hash");
+            const bool wasMaterialized = resource.IsMaterialized();
+            const auto& data = resource.Data();
+            DigestLength(context.get(), data.size());
+            if (EVP_DigestUpdate(context.get(), data.data(), data.size()) != 1)
+                throw std::runtime_error("cannot update JBT content hash");
+            if (!wasMaterialized)
+                resource.bytes.reset();
+        }
+        std::array<uint8_t, 32> digest{};
+        unsigned int digestLength = 0;
+        if (EVP_DigestFinal_ex(context.get(), digest.data(), &digestLength) != 1 ||
+            digestLength != digest.size())
+            throw std::runtime_error("cannot finalize JBT content hash");
+        return digest;
+    }
+
     bool SamePackContent(bmt::MusicPack& left, bmt::MusicPack& right)
     {
-        if (left.resources.size() != right.resources.size())
-            return false;
-        auto leftResource = left.resources.begin();
-        auto rightResource = right.resources.begin();
-        for (; leftResource != left.resources.end(); ++leftResource, ++rightResource)
-        {
-            if (leftResource->first != rightResource->first)
-                return false;
-            auto& leftValue = leftResource->second;
-            auto& rightValue = rightResource->second;
-            const bool leftWasMaterialized = leftValue.IsMaterialized();
-            const bool rightWasMaterialized = rightValue.IsMaterialized();
-            const bool equal = leftValue.Data() == rightValue.Data();
-            if (!leftWasMaterialized)
-                leftValue.bytes.reset();
-            if (!rightWasMaterialized)
-                rightValue.bytes.reset();
-            if (!equal)
-                return false;
-        }
-        return true;
+        return PackContentHash(left) == PackContentHash(right);
     }
 
     void RewriteInfoID(bmt::MusicPack& pack)

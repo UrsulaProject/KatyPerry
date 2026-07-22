@@ -402,6 +402,29 @@ int RunTests()
     assert(deduplicated.droppedDuplicates == 2);
     assert(deduplicated.packs.at(123456789).front().dlcType == bmt::DLCType::Official);
 
+    const auto metadataDuplicateDirectory = output / "metadata-duplicate-source";
+    bmt::LoadResult metadataDuplicateExport;
+    bmt::MusicPack metadataDuplicate = loaded.packs.at(123456789).front();
+    auto& metadataInfo = metadataDuplicate.resources.at("infov2");
+    auto changedInfo = metadataInfo.Data();
+    const std::string oldName = "Test Song";
+    const std::string newName = "Alt Song!";
+    const auto infoNamePosition = std::search(changedInfo.begin(), changedInfo.end(),
+                                              oldName.begin(), oldName.end());
+    assert(infoNamePosition != changedInfo.end());
+    std::copy(newName.begin(), newName.end(), infoNamePosition);
+    metadataInfo.bytes = std::move(changedInfo);
+    metadataInfo.lazyLoader = {};
+    metadataDuplicateExport.packs[metadataDuplicate.id].push_back(std::move(metadataDuplicate));
+    bmt::ExportPacks(metadataDuplicateExport, metadataDuplicateDirectory,
+                     {.encryptJBT = false});
+    auto metadataDeduplicated = bmt::LoadPacks({
+        {bmt::DLCType::Official, output},
+        {bmt::DLCType::Custom, metadataDuplicateDirectory},
+    }, {.mode = bmt::LoadMode::Lazy, .failureMode = bmt::FailureMode::Strict});
+    assert(metadataDeduplicated.packs.size() == 5);
+    assert(metadataDeduplicated.droppedDuplicates == 1);
+
     WriteText(duplicateDirectory / "mapping.json", "{\n  \"323456789\": 323456780\n}\n");
     auto fileIDMapped = bmt::LoadPacks(
         {{bmt::DLCType::Custom, duplicateDirectory}},
