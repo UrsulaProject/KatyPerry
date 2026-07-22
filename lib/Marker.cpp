@@ -2,14 +2,11 @@
 
 #include <Bemani/BFContainer.h>
 
+#include "CryptoSupport.h"
 #include "FileSupport.h"
 #include "ZipSupport.h"
 
 #include <json-c/json.h>
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/rand.h>
 #include <plist/plist.h>
 
 #include <algorithm>
@@ -42,15 +39,8 @@ namespace
     };
     using PlistPtr = std::unique_ptr<std::remove_pointer_t<plist_t>, PlistDeleter>;
 
-    struct CipherContextDeleter
-    {
-        void operator()(EVP_CIPHER_CTX* value) const noexcept
-        {
-            EVP_CIPHER_CTX_free(value);
-        }
-    };
-    using CipherContextPtr = std::unique_ptr<EVP_CIPHER_CTX, CipherContextDeleter>;
-
+    using bmt::detail::Base64Decode;
+    using bmt::detail::Base64Encode;
     using bmt::detail::ReadFile;
     using bmt::detail::ReadZipEntry;
     using bmt::detail::WriteFile;
@@ -70,65 +60,6 @@ namespace
                std::equal(Signature.begin(), Signature.end(), data.begin());
     }
 
-    std::vector<uint8_t> Base64Decode(std::string_view encoded)
-    {
-        std::string compact;
-        compact.reserve(encoded.size() + 3);
-        for (const char value : encoded)
-            if (value != ' ' && value != '\n' && value != '\r' && value != '\t')
-                compact.push_back(value);
-        while (compact.size() % 4)
-            compact.push_back('=');
-        if (compact.empty())
-            return {};
-        std::vector<uint8_t> output((compact.size() / 4) * 3);
-        const int size = EVP_DecodeBlock(output.data(),
-            reinterpret_cast<const unsigned char*>(compact.data()),
-            static_cast<int>(compact.size()));
-        if (size < 0)
-            throw std::runtime_error("invalid Base64 data");
-        size_t actual = static_cast<size_t>(size);
-        if (!compact.empty() && compact.back() == '=')
-            --actual;
-        if (compact.size() >= 2 && compact[compact.size() - 2] == '=')
-            --actual;
-        output.resize(actual);
-        return output;
-    }
-
-    std::string Base64Encode(std::span<const uint8_t> data)
-    {
-        if (data.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
-            throw std::runtime_error("data is too large for Base64");
-        std::string output(((data.size() + 2) / 3) * 4, '\0');
-        const int size = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(output.data()),
-                                         data.data(), static_cast<int>(data.size()));
-        if (size < 0)
-            throw std::runtime_error("Base64 encoding failed");
-        output.resize(static_cast<size_t>(size));
-        return output;
-    }
-
-    std::vector<uint8_t> AESDecrypt(std::span<const uint8_t> ciphertext,
-                                    std::span<const uint8_t> key,
-                                    std::span<const uint8_t> iv)
-    {
-        CipherContextPtr context(EVP_CIPHER_CTX_new());
-        if (!context ||
-            EVP_DecryptInit_ex(context.get(), EVP_aes_256_cbc(), nullptr,
-                               key.data(), iv.data()) != 1)
-            throw std::runtime_error("AES initialization failed");
-        std::vector<uint8_t> plaintext(ciphertext.size() + 16);
-        int first = 0;
-        int last = 0;
-        if (EVP_DecryptUpdate(context.get(), plaintext.data(), &first,
-                              ciphertext.data(), static_cast<int>(ciphertext.size())) != 1 ||
-            EVP_DecryptFinal_ex(context.get(), plaintext.data() + first, &last) != 1)
-            throw std::runtime_error("AES or PKCS7 validation failed");
-        plaintext.resize(static_cast<size_t>(first + last));
-        return plaintext;
-    }
-
     std::vector<uint8_t> DecryptJBHotMarker(std::span<const uint8_t> data)
     {
         if (!StartsWith(data, "=JBHOT=") || data.size() <= 12)
@@ -137,31 +68,7 @@ namespace
             throw std::runtime_error("JBHot marker has a non-marker resource type");
         const auto blob = Base64Decode(std::string_view(
             reinterpret_cast<const char*>(data.data() + 12), data.size() - 12));
-        if (blob.size() < 66 || (blob[0] != 2 && blob[0] != 3) || !(blob[1] & 1))
-            throw std::runtime_error("unsupported RNCryptor payload");
-        const auto encryptionSalt = std::span(blob).subspan(2, 8);
-        const auto hmacSalt = std::span(blob).subspan(10, 8);
-        const auto iv = std::span(blob).subspan(18, 16);
-        const auto ciphertext = std::span(blob).subspan(34, blob.size() - 66);
-        const auto expectedHmac = std::span(blob).last(32);
-        std::array<uint8_t, 32> encryptionKey{};
-        std::array<uint8_t, 32> hmacKey{};
-        if (PKCS5_PBKDF2_HMAC_SHA1(JBHotMarkerPassword.data(), JBHotMarkerPassword.size(),
-                                   encryptionSalt.data(), encryptionSalt.size(), 10000,
-                                   encryptionKey.size(), encryptionKey.data()) != 1 ||
-            PKCS5_PBKDF2_HMAC_SHA1(JBHotMarkerPassword.data(), JBHotMarkerPassword.size(),
-                                   hmacSalt.data(), hmacSalt.size(), 10000,
-                                   hmacKey.size(), hmacKey.data()) != 1)
-            throw std::runtime_error("RNCryptor PBKDF2 failed");
-        const auto hmacInput = blob[0] == 3 ? std::span(blob).first(blob.size() - 32)
-                                            : ciphertext;
-        std::array<uint8_t, EVP_MAX_MD_SIZE> actual{};
-        unsigned int actualSize = 0;
-        if (!HMAC(EVP_sha256(), hmacKey.data(), hmacKey.size(), hmacInput.data(),
-                  hmacInput.size(), actual.data(), &actualSize) || actualSize != 32 ||
-            CRYPTO_memcmp(actual.data(), expectedHmac.data(), 32) != 0)
-            throw std::runtime_error("RNCryptor HMAC validation failed");
-        return AESDecrypt(ciphertext, encryptionKey, iv);
+        return bmt::detail::DecryptRNCryptor(blob, JBHotMarkerPassword);
     }
 
     std::vector<uint8_t> NormalizePNG(std::vector<uint8_t> data)
@@ -191,10 +98,7 @@ namespace
     {
         if (!IsPNG(png))
             throw std::runtime_error("marker member is not a PNG");
-        std::vector<uint8_t> prefixed(4);
-        if (RAND_bytes(prefixed.data(), static_cast<int>(prefixed.size())) != 1)
-            throw std::runtime_error("cannot generate marker prefix");
-        prefixed.insert(prefixed.end(), png.begin(), png.end());
+        const auto prefixed = bmt::detail::PrependRandomBytes(png, 4);
         return bmt::EncryptBFContainer(prefixed, MarkerKey);
     }
 
