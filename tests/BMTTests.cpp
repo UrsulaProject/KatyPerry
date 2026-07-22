@@ -436,6 +436,19 @@ int RunTests()
     assert(fileIDMapped.packs.at(323456780).front().sourceFileID == 323456789);
     assert(fileIDMapped.packs.at(323456780).front().originalID == 123456789);
 
+    WriteText(duplicateDirectory / "mapping.json",
+              "{\n  \"123456789\": 223456780,\n  \"323456789\": 323456780\n}\n");
+    auto sharedInfoIDMapped = bmt::LoadPacks(
+        {{bmt::DLCType::Custom, duplicateDirectory}},
+        {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(sharedInfoIDMapped.packs.size() == 2);
+    assert(sharedInfoIDMapped.packs.contains(223456780));
+    assert(sharedInfoIDMapped.packs.contains(323456780));
+    assert(sharedInfoIDMapped.packs.at(223456780).front().sourceFileID == 123456789);
+    assert(sharedInfoIDMapped.packs.at(323456780).front().sourceFileID == 323456789);
+    assert(sharedInfoIDMapped.packs.at(223456780).front().originalID == 123456789);
+    assert(sharedInfoIDMapped.packs.at(323456780).front().originalID == 123456789);
+
     bmt::ExportPacks(playlistConflict, output / "playlist-export");
     assert(std::filesystem::is_regular_file(output / "playlist-export" / "playlists.plist"));
     const auto playlistBytes = ReadBytes(output / "playlist-export" / "playlists.plist");

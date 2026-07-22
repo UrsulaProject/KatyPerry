@@ -506,17 +506,20 @@ namespace
         {
             for (auto& pack : instances)
             {
-                const auto jbhot = musicData.find(id);
-                const auto official = officialByID.find(id);
+                const uint32_t catalogID = pack.dlcType == bmt::DLCType::JBHot
+                                               ? id
+                                               : pack.sourceFileID;
+                const auto jbhot = musicData.find(catalogID);
+                const auto official = officialByID.find(catalogID);
                 if (pack.dlcType == bmt::DLCType::JBHot && jbhot != musicData.end())
                 {
                     ApplyCatalogEntry(pack, jbhot->second.catalog);
                     pack.catalogSource = bmt::CatalogSource::JBHot;
                 }
                 else if (const auto dlc = catalogsByDLC.find(pack.dlcOrder);
-                         dlc != catalogsByDLC.end() && dlc->second.contains(id))
+                         dlc != catalogsByDLC.end() && dlc->second.contains(catalogID))
                 {
-                    ApplyCatalogEntry(pack, dlc->second.at(id));
+                    ApplyCatalogEntry(pack, dlc->second.at(catalogID));
                     pack.catalogSource = bmt::CatalogSource::Official;
                 }
                 else if (hasExplicitCatalog && official != officialByID.end())
@@ -688,20 +691,10 @@ namespace
                         const fs::path& sourceDirectory)
     {
         std::set<uint32_t> loadedIDs;
-        IDMapping logicalMapping;
         for (const auto& [id, instances] : sourceResult.packs)
         {
             for (const auto& pack : instances)
-            {
                 loadedIDs.insert(pack.sourceFileID);
-                const auto mapped = mapping.find(pack.sourceFileID);
-                if (mapped == mapping.end())
-                    continue;
-                const auto [position, inserted] = logicalMapping.emplace(pack.originalID, mapped->second);
-                if (!inserted && position->second != mapped->second)
-                    throw std::runtime_error("mapping.json assigns multiple targets to info ID " +
-                                             std::to_string(pack.originalID));
-            }
         }
         bmt::PackTable mappedPacks;
         for (auto& [id, instances] : sourceResult.packs)
@@ -713,8 +706,8 @@ namespace
                 pack.id = finalID == pack.sourceFileID && !mapping.contains(pack.sourceFileID)
                               ? pack.originalID
                               : finalID;
-                pack.extID = MappedID(logicalMapping, pack.extID);
-                pack.baseID = MappedID(logicalMapping, pack.baseID);
+                pack.extID = MappedID(mapping, pack.extID);
+                pack.baseID = MappedID(mapping, pack.baseID);
                 if (pack.id != pack.originalID)
                 {
                     sourceResult.remaps.push_back({pack.sourcePath, pack.originalID, pack.id});
@@ -745,6 +738,7 @@ namespace
             }
             instances.erase(instances.begin() + 1, instances.end());
         }
+        NormalizePackRelationships(mappedPacks);
         for (const auto& [oldID, newID] : mapping)
         {
             if (!loadedIDs.contains(oldID))
@@ -755,7 +749,7 @@ namespace
         for (auto& playlist : sourceResult.playlists)
         {
             for (auto& id : playlist.musicIDs)
-                id = MappedID(logicalMapping, id);
+                id = MappedID(mapping, id);
         }
     }
 
