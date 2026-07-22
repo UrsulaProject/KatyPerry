@@ -28,6 +28,26 @@ Load official packs (a companion `mulist.plist` is discovered automatically):
 ./build/BemaniTools load --official /path/to/official-packs
 ```
 
+Convert one JBT between decrypted/plaintext members and the official BF format:
+
+```sh
+./build/BemaniTools jbt-decrypt input.jbt plaintext.jbt
+./build/BemaniTools jbt-encrypt plaintext.jbt encrypted.jbt
+```
+
+JBHot input additionally needs `--jbhot-plist=/path/to/defaults.plist` on
+`jbt-decrypt`. To inspect or rebuild members directly, use `jbt-unpack` and
+`jbt-pack`. Recursive directory variants preserve relative paths:
+
+```sh
+./build/BemaniTools jbt-unpack-dir /path/to/jbts /path/to/expanded
+./build/BemaniTools jbt-pack-dir /path/to/expanded /path/to/repacked
+```
+
+Each expanded JBT is represented by a directory named after the original file
+stem. `jbt-pack` and `jbt-pack-dir` encrypt output by default; pass
+`--encrypt-jbt=false` for plaintext JBTs.
+
 Load JBHot packs. The Loader decrypts both `musicData` and `serverData` directly
 from the NSUserDefaults plist:
 

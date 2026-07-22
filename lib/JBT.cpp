@@ -1061,6 +1061,8 @@ namespace
     void WriteJBT(bmt::MusicPack& pack, const fs::path& path, bool encrypt)
     {
         RewriteInfoID(pack);
+        if (!path.parent_path().empty())
+            fs::create_directories(path.parent_path());
         int error = 0;
         zip_t* rawArchive = zip_open(path.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error);
         if (!rawArchive)
@@ -1097,6 +1099,110 @@ namespace
             throw std::runtime_error("cannot finalize output JBT " + path.string());
         archive.release();
         AppendJBTDigest(path);
+    }
+
+    std::shared_ptr<JBHotMap> StandaloneMusicData(const bmt::LoadOptions& options)
+    {
+        if (!options.jbhotDefaultsPlist)
+            return std::make_shared<JBHotMap>();
+        auto defaults = LoadJBHotDefaults(*options.jbhotDefaultsPlist);
+        return std::make_shared<JBHotMap>(std::move(defaults.music));
+    }
+
+    bmt::MusicPack LoadStandaloneJBT(const fs::path& path, const bmt::LoadOptions& options)
+    {
+        if (!fs::is_regular_file(path))
+            throw std::invalid_argument("JBT input is not a regular file: " + path.string());
+        return LoadOnePack(path, options, StandaloneMusicData(options));
+    }
+
+    fs::path SafeMemberPath(std::string_view name)
+    {
+        const fs::path path(name);
+        if (path.empty() || path.is_absolute() || path.has_root_path())
+            throw std::runtime_error("unsafe JBT member path: " + std::string(name));
+        for (const auto& component : path)
+        {
+            if (component == "..")
+                throw std::runtime_error("unsafe JBT member path: " + std::string(name));
+        }
+        const fs::path normalized = path.lexically_normal();
+        if (normalized.empty() || normalized == ".")
+            throw std::runtime_error("unsafe JBT member path: " + std::string(name));
+        return normalized;
+    }
+
+    void ExtractPack(bmt::MusicPack& pack, const fs::path& outputDirectory)
+    {
+        fs::create_directories(outputDirectory);
+        for (auto& [name, resource] : pack.resources)
+        {
+            const fs::path output = outputDirectory / SafeMemberPath(name);
+            if (!output.parent_path().empty())
+                fs::create_directories(output.parent_path());
+            WriteFile(output, resource.Data());
+        }
+    }
+
+    bmt::MusicPack LoadExpandedPack(const fs::path& directory)
+    {
+        if (!fs::is_directory(directory))
+            throw std::invalid_argument("expanded JBT input is not a directory: " + directory.string());
+        std::vector<std::string> names;
+        bmt::MusicPack pack;
+        pack.sourcePath = directory;
+        pack.format = bmt::PackFormat::Plain;
+        for (const auto& entry : fs::recursive_directory_iterator(directory))
+        {
+            if (entry.is_symlink())
+                throw std::runtime_error("expanded JBT contains a symlink: " + entry.path().string());
+            if (!entry.is_regular_file())
+                continue;
+            const std::string name = fs::relative(entry.path(), directory).generic_string();
+            SafeMemberPath(name);
+            names.push_back(name);
+            bmt::PackResource resource;
+            resource.name = name;
+            resource.bytes = ReadFile(entry.path());
+            pack.resources.emplace(name, std::move(resource));
+        }
+        std::sort(names.begin(), names.end());
+        const auto [revision, infoMember] = SelectInfoMember(names);
+        pack.infoRevision = revision;
+        pack.infoMember = infoMember;
+        ParseInfo(pack, pack.resources.at(infoMember).Data());
+        return pack;
+    }
+
+    std::vector<fs::path> RecursiveJBTFiles(const fs::path& directory)
+    {
+        if (!fs::is_directory(directory))
+            throw std::invalid_argument("JBT input is not a directory: " + directory.string());
+        std::vector<fs::path> files;
+        for (const auto& entry : fs::recursive_directory_iterator(directory))
+        {
+            if (entry.is_regular_file() && entry.path().extension() == ".jbt")
+                files.push_back(entry.path());
+        }
+        std::sort(files.begin(), files.end());
+        return files;
+    }
+
+    std::vector<fs::path> ExpandedPackDirectories(const fs::path& directory)
+    {
+        if (!fs::is_directory(directory))
+            throw std::invalid_argument("expanded JBT input is not a directory: " + directory.string());
+        std::set<fs::path> directories;
+        constexpr std::array<std::string_view, 3> InfoNames = {"info", "infov2", "infov3"};
+        for (const auto& entry : fs::recursive_directory_iterator(directory))
+        {
+            if (!entry.is_regular_file())
+                continue;
+            const std::string filename = entry.path().filename().string();
+            if (std::find(InfoNames.begin(), InfoNames.end(), filename) != InfoNames.end())
+                directories.insert(entry.path().parent_path());
+        }
+        return {directories.begin(), directories.end()};
     }
 
     void SetCatalogCommon(plist_t dictionary,
@@ -1487,6 +1593,70 @@ namespace bmt
             MergeDLC(result, sourceResult, source.directory);
         }
         return result;
+    }
+
+    void DecryptJBT(const fs::path& inputJBT,
+                    const fs::path& outputJBT,
+                    const LoadOptions& options)
+    {
+        auto pack = LoadStandaloneJBT(inputJBT, options);
+        WriteJBT(pack, outputJBT, false);
+    }
+
+    void EncryptJBT(const fs::path& inputJBT, const fs::path& outputJBT)
+    {
+        LoadOptions options;
+        options.mode = LoadMode::Eager;
+        auto pack = LoadStandaloneJBT(inputJBT, options);
+        WriteJBT(pack, outputJBT, true);
+    }
+
+    void UnpackJBT(const fs::path& inputJBT,
+                   const fs::path& outputDirectory,
+                   const LoadOptions& options)
+    {
+        auto eagerOptions = options;
+        eagerOptions.mode = LoadMode::Eager;
+        auto pack = LoadStandaloneJBT(inputJBT, eagerOptions);
+        ExtractPack(pack, outputDirectory);
+    }
+
+    void PackJBT(const fs::path& inputDirectory,
+                 const fs::path& outputJBT,
+                 bool encrypt)
+    {
+        auto pack = LoadExpandedPack(inputDirectory);
+        WriteJBT(pack, outputJBT, encrypt);
+    }
+
+    void UnpackJBTDirectory(const fs::path& inputDirectory,
+                            const fs::path& outputDirectory,
+                            const LoadOptions& options)
+    {
+        auto eagerOptions = options;
+        eagerOptions.mode = LoadMode::Eager;
+        for (const auto& input : RecursiveJBTFiles(inputDirectory))
+        {
+            fs::path relative = fs::relative(input, inputDirectory);
+            relative.replace_extension();
+            auto pack = LoadStandaloneJBT(input, eagerOptions);
+            ExtractPack(pack, outputDirectory / relative);
+        }
+    }
+
+    void PackJBTDirectory(const fs::path& inputDirectory,
+                          const fs::path& outputDirectory,
+                          bool encrypt)
+    {
+        for (const auto& directory : ExpandedPackDirectories(inputDirectory))
+        {
+            fs::path relative = fs::relative(directory, inputDirectory);
+            if (relative.empty() || relative == ".")
+                relative = inputDirectory.filename();
+            relative += ".jbt";
+            auto pack = LoadExpandedPack(directory);
+            WriteJBT(pack, outputDirectory / relative, encrypt);
+        }
     }
 
     static void ExportPacksImpl(PackTable& packs,

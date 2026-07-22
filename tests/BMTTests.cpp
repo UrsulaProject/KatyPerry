@@ -223,6 +223,52 @@ int main()
     assert(plaintextLoaded.packs.at(123456789).front().resources.at("seq_bas").Data() ==
            loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
 
+    const auto transformRoot = output / "jbt-transforms";
+    const auto decryptedDirectory = transformRoot / "decrypted";
+    const auto encryptedDirectory = transformRoot / "encrypted";
+    bmt::DecryptJBT(output / "123456789.jbt",
+                    decryptedDirectory / "123456789.jbt");
+    auto singlePlain = bmt::LoadPacks(
+        {{bmt::DLCType::Custom, decryptedDirectory}},
+        {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(singlePlain.packs.at(123456789).front().format == bmt::PackFormat::Plain);
+    bmt::EncryptJBT(decryptedDirectory / "123456789.jbt",
+                    encryptedDirectory / "123456789.jbt");
+    auto singleEncrypted = bmt::LoadPacks(
+        {{bmt::DLCType::Custom, encryptedDirectory}},
+        {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(singleEncrypted.packs.at(123456789).front().format == bmt::PackFormat::OfficialBF);
+    assert(singleEncrypted.packs.at(123456789).front().resources.at("seq_bas").Data() ==
+           singlePlain.packs.at(123456789).front().resources.at("seq_bas").Data());
+
+    const auto unpackedDirectory = transformRoot / "unpacked" / "123456789";
+    bmt::UnpackJBT(output / "123456789.jbt", unpackedDirectory);
+    assert(ReadBytes(unpackedDirectory / "seq_bas") ==
+           loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
+    const auto repackedDirectory = transformRoot / "repacked";
+    bmt::PackJBT(unpackedDirectory, repackedDirectory / "123456789.jbt");
+    auto repacked = bmt::LoadPacks(
+        {{bmt::DLCType::Custom, repackedDirectory}},
+        {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(repacked.packs.at(123456789).front().resources.at("seq_bas").Data() ==
+           loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
+
+    const auto batchInput = transformRoot / "batch-input";
+    std::filesystem::create_directories(batchInput / "nested");
+    std::filesystem::copy_file(output / "123456789.jbt", batchInput / "123456789.jbt");
+    std::filesystem::copy_file(output / "123456790.jbt",
+                               batchInput / "nested" / "123456790.jbt");
+    const auto batchExpanded = transformRoot / "batch-expanded";
+    bmt::UnpackJBTDirectory(batchInput, batchExpanded);
+    assert(std::filesystem::is_regular_file(batchExpanded / "123456789" / "infov2"));
+    assert(std::filesystem::is_regular_file(batchExpanded / "nested" / "123456790" / "infov3"));
+    const auto batchRepacked = transformRoot / "batch-repacked";
+    bmt::PackJBTDirectory(batchExpanded, batchRepacked);
+    assert(std::filesystem::is_regular_file(batchRepacked / "123456789.jbt"));
+    assert(std::filesystem::is_regular_file(batchRepacked / "nested" / "123456790.jbt"));
+    bmt::DecryptJBT(batchRepacked / "nested" / "123456790.jbt",
+                    transformRoot / "batch-v3-plain.jbt");
+
     const auto customDirectory = output / "custom";
     std::filesystem::create_directory(customDirectory);
     std::filesystem::copy_file(output / "123456792.jbt", customDirectory / "123456792.jbt");

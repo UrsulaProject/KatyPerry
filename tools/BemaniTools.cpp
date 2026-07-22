@@ -29,6 +29,12 @@ namespace
         std::cerr
             << "Usage:\n"
             << "  BemaniTools mulist-decrypt <mulist> <keychain-plist> <output-plist>\n"
+            << "  BemaniTools jbt-decrypt <input.jbt> <plaintext.jbt> [--jbhot-plist=<path>]\n"
+            << "  BemaniTools jbt-encrypt <plaintext.jbt> <output.jbt>\n"
+            << "  BemaniTools jbt-unpack <input.jbt> <output-directory> [--jbhot-plist=<path>]\n"
+            << "  BemaniTools jbt-pack <input-directory> <output.jbt> [--encrypt-jbt=true|false]\n"
+            << "  BemaniTools jbt-unpack-dir <input-directory> <output-directory> [--jbhot-plist=<path>]\n"
+            << "  BemaniTools jbt-pack-dir <input-directory> <output-directory> [--encrypt-jbt=true|false]\n"
             << "  BemaniTools load [options]\n\n"
             << "load options:\n"
             << "  --eager                    materialize every resource\n"
@@ -75,6 +81,51 @@ int main(int argc, char** argv)
             const auto plaintext = bmt::DecryptOfficialMusicList(argv[2], argv[3]);
             WriteFile(argv[4], plaintext);
             std::cout << "wrote " << plaintext.size() << " bytes to " << argv[4] << '\n';
+            return 0;
+        }
+        if (command == "jbt-decrypt" || command == "jbt-encrypt" ||
+            command == "jbt-unpack" || command == "jbt-pack" ||
+            command == "jbt-unpack-dir" || command == "jbt-pack-dir")
+        {
+            bmt::LoadOptions options;
+            bool encrypt = true;
+            std::vector<fs::path> positional;
+            for (int index = 2; index < argc; ++index)
+            {
+                const std::string argument = argv[index];
+                if (argument.starts_with("--jbhot-plist="))
+                    options.jbhotDefaultsPlist = argument.substr(14);
+                else if (argument == "--jbhot-plist")
+                {
+                    if (++index >= argc)
+                        throw std::runtime_error("--jbhot-plist requires a value");
+                    options.jbhotDefaultsPlist = argv[index];
+                }
+                else if (argument.starts_with("--encrypt-jbt="))
+                    encrypt = ParseBoolean(std::string_view(argument).substr(14));
+                else if (argument.starts_with("--"))
+                    throw std::runtime_error("unknown option " + argument);
+                else
+                    positional.emplace_back(argument);
+            }
+            if (positional.size() != 2)
+            {
+                Usage();
+                return 1;
+            }
+            if (command == "jbt-decrypt")
+                bmt::DecryptJBT(positional[0], positional[1], options);
+            else if (command == "jbt-encrypt")
+                bmt::EncryptJBT(positional[0], positional[1]);
+            else if (command == "jbt-unpack")
+                bmt::UnpackJBT(positional[0], positional[1], options);
+            else if (command == "jbt-pack")
+                bmt::PackJBT(positional[0], positional[1], encrypt);
+            else if (command == "jbt-unpack-dir")
+                bmt::UnpackJBTDirectory(positional[0], positional[1], options);
+            else
+                bmt::PackJBTDirectory(positional[0], positional[1], encrypt);
+            std::cout << command << " completed: " << positional[1] << '\n';
             return 0;
         }
         if (command != "load")

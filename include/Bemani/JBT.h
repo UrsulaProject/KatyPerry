@@ -167,6 +167,23 @@ namespace bmt
 
     LoadResult LoadPacks(const std::vector<DLCSource>& sources,
                          const LoadOptions& options = {});
+    void DecryptJBT(const std::filesystem::path& inputJBT,
+                    const std::filesystem::path& outputJBT,
+                    const LoadOptions& options = {});
+    void EncryptJBT(const std::filesystem::path& inputJBT,
+                    const std::filesystem::path& outputJBT);
+    void UnpackJBT(const std::filesystem::path& inputJBT,
+                   const std::filesystem::path& outputDirectory,
+                   const LoadOptions& options = {});
+    void PackJBT(const std::filesystem::path& inputDirectory,
+                 const std::filesystem::path& outputJBT,
+                 bool encrypt = true);
+    void UnpackJBTDirectory(const std::filesystem::path& inputDirectory,
+                            const std::filesystem::path& outputDirectory,
+                            const LoadOptions& options = {});
+    void PackJBTDirectory(const std::filesystem::path& inputDirectory,
+                          const std::filesystem::path& outputDirectory,
+                          bool encrypt = true);
     void ExportPacks(LoadResult& result,
                      const std::filesystem::path& outputDirectory,
                      const ExportOptions& options = {});
