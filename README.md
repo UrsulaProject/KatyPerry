@@ -13,83 +13,81 @@ Dependencies: libzip, libplist 2.x, OpenSSL/libcrypto, and json-c.
 
 ## CLI
 
-Decrypt the original runtime `mulist` with an `ApplicationUniqueID` Keychain dump:
+The CLI uses command groups. Run `BemaniTools --help` or append `--help` to any
+command for its complete options.
+
+Decrypt or encrypt a runtime mulist with the raw string used before MD5 key
+derivation:
 
 ```sh
-./build/BemaniTools mulist-decrypt \
-  /path/to/Documents/mulist \
-  /path/to/__private_info/_1 \
-  /path/to/Documents/mulist-dec.plist
+./build/BemaniTools mulist decrypt \
+  --input /path/to/mulist --output /path/to/mulist.plist --key SHARED_KEY
+./build/BemaniTools mulist encrypt \
+  --input /path/to/mulist.plist --output /path/to/mulist --key SHARED_KEY
 ```
 
-Load official packs (a companion `mulist.plist` is discovered automatically):
+Convert, expand, and repack JBTs. The `*-dir` forms recurse while preserving
+relative paths. JBHot inputs require the encrypted defaults plist. Packing uses
+official BF encryption unless `--plain` is supplied.
 
 ```sh
-./build/BemaniTools load --official /path/to/official-packs
+./build/BemaniTools jbt unpack --input song.jbt --output expanded/song
+./build/BemaniTools jbt pack --input expanded/song --output song.jbt
+./build/BemaniTools jbt decrypt --input hot.jbt --output plain.jbt \
+  --jbhot-plist /path/to/defaults.plist
 ```
 
-Convert one JBT between decrypted/plaintext members and the official BF format:
+Merge complete DLC sources and export JBTs, mulist, and playlists:
 
 ```sh
-./build/BemaniTools jbt-decrypt input.jbt plaintext.jbt
-./build/BemaniTools jbt-encrypt plaintext.jbt encrypted.jbt
+./build/BemaniTools dlc build \
+  --official /path/to/official \
+  --jbhot /path/to/hot \
+  --jbhot-plist /path/to/defaults.plist \
+  --custom-dir /path/to/custom-one \
+  --custom-dir /path/to/custom-two \
+  --output /path/to/output \
+  --encrypt-jbt=true --separate-output --mulist-key SHARED_KEY
 ```
 
-JBHot input additionally needs `--jbhot-plist=/path/to/defaults.plist` on
-`jbt-decrypt`. To inspect or rebuild members directly, use `jbt-unpack` and
-`jbt-pack`. Recursive directory variants preserve relative paths:
+Decrypt the known JBHot defaults payloads to formatted JSON:
 
 ```sh
-./build/BemaniTools jbt-unpack-dir /path/to/jbts /path/to/expanded
-./build/BemaniTools jbt-pack-dir /path/to/expanded /path/to/repacked
+./build/BemaniTools jbhot defaults-dump \
+  --input /path/to/defaults.plist --output-dir /path/to/json
 ```
 
-Each expanded JBT is represented by a directory named after the original file
-stem. `jbt-pack` and `jbt-pack-dir` encrypt output by default; pass
-`--encrypt-jbt=false` for plaintext JBTs.
-
-Load JBHot packs. The Loader decrypts both `musicData` and `serverData` directly
-from the NSUserDefaults plist:
+Marker conversion mirrors JBT conversion. Decrypted/expanded members are real
+PNG files without the game's four-byte prefix; generated ZIPs use official BF
+encryption. `marker build` scans only actual `mk<id>.zip` files and exports the
+matching external banners.
 
 ```sh
-./build/BemaniTools load \
-  --jbhot /path/to/jbhot-packs \
-  --jbhot-plist=/path/to/jp.konmai.jbhot2.T2SSHXUSCG.plist
+./build/BemaniTools marker unpack --input mk0048.zip --output expanded/mk0048
+./build/BemaniTools marker pack --input expanded/mk0048 --output mk0048.zip
+./build/BemaniTools marker build \
+  --official /path/to/official-marker \
+  --jbhot /path/to/hot-marker \
+  --custom-dir /path/to/custom-marker \
+  --output /path/to/marker-output \
+  --marker-list-output /path/to/PrefMarkerInfoList \
+  --marker-list-format raw
 ```
 
-Custom DLC directories accept either BF-encrypted or plaintext JBTs:
+Marker-list plaintext is an XML plist array containing `markerID`, `bannerName`,
+and `version`. Encryption rebuilds an Apple-compatible NSKeyedArchiver before
+applying BFCodec. Both raw NSData and Base64 encodings are supported.
 
 ```sh
-./build/BemaniTools load \
-  --official /path/to/official-packs \
-  --jbhot /path/to/jbhot-packs \
-  --jbhot-plist=/path/to/jbhot-defaults.plist \
-  --custom-dir=/path/to/custom-one \
-  --custom-dir=/path/to/custom-two \
-  --encrypt-jbt=true \
-  --separate-output \
-  --mulist-key=SHARED_KEY \
-  --export /path/to/output
+./build/BemaniTools marker-list decrypt \
+  --input PrefMarkerInfoList --output marker-list.plist
+./build/BemaniTools marker-list encrypt \
+  --input marker-list.plist --output PrefMarkerInfoList --format raw
 ```
 
-Exported JBT members use the official BF encryption by default; pass
-`--encrypt-jbt=false` for plaintext members. `mulist.plist` is always written in
-plaintext. When `--mulist-key` is present, the exporter additionally writes an
-official BF-encrypted `mulist`, deriving the codec key from the supplied raw key
-and prepending four random bytes before the plist as the game expects.
-
-With `--separate-output`, JBTs are grouped by input DLC under `official/`,
-`jbhot/`, and `custom-1/`, `custom-2/`, ... in Custom command-line order.
-The merged `mulist`, `mulist.plist`, and `playlists.plist` remain in the output
-root. This organized layout is intended for staging; the game itself expects
-the JBT files directly in its `Documents` directory.
-
-An Official or Custom DLC companion `playlists.plist` is merged with the playlists
-from JBHot `serverData`. ID mappings are also applied to playlist entries from the
-same DLC. Use
-`--playlist-export /path/to/playlists.plist` to write the merged official
-`LIST`/`NAME`/`PLID` format without exporting JBTs. Existing 32-character hex
-PLIDs are preserved; a random PLID is generated for source playlists without one.
+Exported music JBTs and marker ZIP members use official BF encryption. Runtime
+lists receive the original four-byte prefix: mulist and official marker frames
+use random bytes, while decryption normalizes the application-visible payload.
 
 Each DLC is resolved as it is loaded. If an incoming file conflicts with a
 different pack already loaded, its directory must contain a `mapping.json` object:
@@ -111,5 +109,7 @@ compared byte-for-byte; a later identical relationship component is
 dropped, so CLI priority is Official, JBHot, then Custom command-line order. No IDs
 are generated automatically.
 
-The library API is declared in `include/Bemani/JBT.h`. `LoadResult::packs` is a
-`std::map<uint32_t, std::vector<MusicPack>>`; lazy loading is the default and eager loading is available through `LoadOptions`.
+The music and marker APIs are declared in `include/Bemani/JBT.h` and
+`include/Bemani/Marker.h`. `LoadResult::packs` remains a
+`std::map<uint32_t, std::vector<MusicPack>>`; music resources are lazy by
+default and can be materialized eagerly with `LoadOptions`.
