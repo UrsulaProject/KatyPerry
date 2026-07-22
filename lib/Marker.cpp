@@ -4,6 +4,7 @@
 
 #include "CryptoSupport.h"
 #include "FileSupport.h"
+#include "PlistSupport.h"
 #include "ZipSupport.h"
 
 #include <json-c/json.h>
@@ -29,20 +30,14 @@ namespace
     constexpr std::string_view MarkerListKey = "jubeatskmpledata";
     constexpr std::string_view JBHotMarkerPassword = "myR8PfjD";
 
-    struct PlistDeleter
-    {
-        void operator()(plist_t value) const noexcept
-        {
-            if (value)
-                plist_free(value);
-        }
-    };
-    using PlistPtr = std::unique_ptr<std::remove_pointer_t<plist_t>, PlistDeleter>;
-
     using bmt::detail::Base64Decode;
     using bmt::detail::Base64Encode;
+    using bmt::detail::ParsePlist;
+    using bmt::detail::PlistPtr;
+    using bmt::detail::PlistString;
     using bmt::detail::ReadFile;
     using bmt::detail::ReadZipEntry;
+    using bmt::detail::SerializePlist;
     using bmt::detail::WriteFile;
 
     bool StartsWith(std::span<const uint8_t> data, std::string_view prefix) noexcept
@@ -221,43 +216,6 @@ namespace
                 left.frames[index].png != right.frames[index].png)
                 return false;
         return true;
-    }
-
-    PlistPtr ParsePlist(std::span<const uint8_t> data)
-    {
-        plist_t raw = nullptr;
-        plist_format_t format = PLIST_FORMAT_NONE;
-        if (plist_from_memory(reinterpret_cast<const char*>(data.data()), data.size(),
-                              &raw, &format) != PLIST_ERR_SUCCESS || !raw)
-            throw std::runtime_error("invalid property list");
-        return PlistPtr(raw);
-    }
-
-    std::vector<uint8_t> SerializePlist(plist_t value, plist_format_t format)
-    {
-        char* bytes = nullptr;
-        uint32_t size = 0;
-        const plist_err_t result = format == PLIST_FORMAT_BINARY
-            ? plist_to_bin(value, &bytes, &size)
-            : plist_to_xml(value, &bytes, &size);
-        if (result != PLIST_ERR_SUCCESS || !bytes)
-            throw std::runtime_error("property list serialization failed");
-        std::vector<uint8_t> output(bytes, bytes + size);
-        plist_mem_free(bytes);
-        return output;
-    }
-
-    std::string PlistString(plist_t dictionary, const char* key)
-    {
-        plist_t value = plist_dict_get_item(dictionary, key);
-        if (!value || plist_get_node_type(value) != PLIST_STRING)
-            return {};
-        char* string = nullptr;
-        plist_get_string_val(value, &string);
-        std::string output = string ? string : "";
-        if (string)
-            plist_mem_free(string);
-        return output;
     }
 
     uint64_t UIDValue(plist_t value)
