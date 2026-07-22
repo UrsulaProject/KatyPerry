@@ -5,6 +5,7 @@
 #ifndef BMT_BFCODEC_H
 #define BMT_BFCODEC_H
 #include <array>
+#include <cstdint>
 #include <vector>
 #include <utility>
 namespace bmt

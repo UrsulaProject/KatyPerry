@@ -3,6 +3,8 @@
 //
 #include <Bemani/BFDefaults.h>
 
+#include <cstddef>
+
 #include <array>
 
 namespace
