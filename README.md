@@ -48,11 +48,12 @@ cmake --install build --prefix /path/to/package
 ### GitHub Actions
 
 `Build` workflow 会在 push、pull request 和手动触发时使用锁定的
-vcpkg 依赖构建 Linux x64、macOS arm64 和 Windows x64，运行全部
+vcpkg 依赖构建 Linux x64、macOS arm64、macOS x64 和 Windows x64，运行全部
 CTest，并上传以下 artifact：
 
 - `BemaniTools-linux-x64`
 - `BemaniTools-macos-arm64`
+- `BemaniTools-macos-x64`
 - `BemaniTools-windows-x64`
 
 每个 artifact 中是一个 `.tar.gz` 或 `.zip` 安装包，CLI 位于包内

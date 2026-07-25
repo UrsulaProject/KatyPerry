@@ -35,6 +35,11 @@ jobs:
             artifact: BemaniTools-macos-arm64
             archive: BemaniTools-macos-arm64.tar.gz
             cmake_options: ""
+          - runner: macos-15-intel
+            triplet: x64-osx
+            artifact: BemaniTools-macos-x64
+            archive: BemaniTools-macos-x64.tar.gz
+            cmake_options: ""
           - runner: windows-2022
             triplet: x64-windows-static
             artifact: BemaniTools-windows-x64
