@@ -3,6 +3,8 @@
 #include <Bemani/BFCodec.h>
 #include <Bemani/BFDefaults.h>
 
+#include "FileSupport.h"
+
 #include <openssl/evp.h>
 
 #include <limits>
@@ -84,5 +86,19 @@ namespace bmt
         WriteBE32(output.data() + output.size() - 8, originalLength);
         WriteBE32(output.data() + output.size() - 4, encryptedLength);
         return output;
+    }
+
+    void DecryptBFFile(const std::filesystem::path& input,
+                       const std::filesystem::path& output,
+                       std::string_view keyString)
+    {
+        detail::WriteFile(output, DecryptBFContainer(detail::ReadFile(input), keyString));
+    }
+
+    void EncryptBFFile(const std::filesystem::path& input,
+                       const std::filesystem::path& output,
+                       std::string_view keyString)
+    {
+        detail::WriteFile(output, EncryptBFContainer(detail::ReadFile(input), keyString));
     }
 }

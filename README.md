@@ -64,8 +64,8 @@ CTest，并上传以下 artifact：
 
 ## 通用格式规则
 
-- 官方 BFCodec 中的四字节随机前缀由核心库透明处理。解包得到的 plist/PNG
-  不含前缀，重新加密时会自动生成新前缀。
+- JBT、Marker 和 mulist 高层命令会透明处理对应格式中的四字节随机前缀。
+  通用 `bfcodec` 命令只处理 BFContainer 本身，不添加或删除 payload 字节。
 - `mulist --key` 和 `dlc build --mulist-key` 接收 MD5 之前的原始字符串，
   例如 `SHARED_KEY`。
 - DLC 读取顺序固定为 Official → JBHot → Custom 参数顺序。内容完全相同的
@@ -96,6 +96,23 @@ JBT 内部 `info.ID`、base/ext 关系、mulist 和 playlists。Marker 的映射
 
 ```sh
 ./build/BemaniTools dlc build --help
+```
+
+### `bfcodec decrypt|encrypt`
+
+直接解密或生成通用 BFContainer。`--key` 接受 MD5 派生之前的原始字符串。
+该命令不会解析明文格式，也不会添加或删除四字节随机前缀。
+
+```sh
+./build/BemaniTools bfcodec decrypt \
+  --input encrypted.bin \
+  --output plaintext.bin \
+  --key RAW_KEY
+
+./build/BemaniTools bfcodec encrypt \
+  --input plaintext.bin \
+  --output encrypted.bin \
+  --key RAW_KEY
 ```
 
 ### `dlc build`

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
@@ -14,6 +15,12 @@ namespace bmt
                                             std::string_view keyString);
     std::vector<uint8_t> EncryptBFContainer(const std::vector<uint8_t>& plainText,
                                             std::string_view keyString);
+    void DecryptBFFile(const std::filesystem::path& input,
+                       const std::filesystem::path& output,
+                       std::string_view keyString);
+    void EncryptBFFile(const std::filesystem::path& input,
+                       const std::filesystem::path& output,
+                       std::string_view keyString);
 }
 
 #endif

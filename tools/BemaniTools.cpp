@@ -1,3 +1,4 @@
+#include <Bemani/BFContainer.h>
 #include <Bemani/JBT.h>
 #include <Bemani/Marker.h>
 
@@ -73,6 +74,7 @@ namespace
         std::cout
             << "Usage: BemaniTools <group> <command> [options]\n\n"
             << "Groups and commands:\n"
+            << "  bfcodec decrypt|encrypt\n"
             << "  dlc build\n"
             << "  mulist decrypt|encrypt\n"
             << "  jbt decrypt|encrypt|unpack|pack|unpack-dir|pack-dir\n"
@@ -80,6 +82,32 @@ namespace
             << "  marker decrypt|encrypt|unpack|pack|unpack-dir|pack-dir|build\n"
             << "  marker-list decrypt\n"
             << "\nUse BemaniTools <group> <command> --help for command options.\n";
+    }
+
+    int RunBFCodec(std::string_view command, const std::vector<std::string>& arguments)
+    {
+        fs::path input;
+        fs::path output;
+        std::string key;
+        po::options_description options("bfcodec " + std::string(command) + " options");
+        options.add_options()
+            ("help,h", "show help")
+            ("input,i", po::value<fs::path>(&input)->required(), "input file")
+            ("output,o", po::value<fs::path>(&output)->required(), "output file")
+            ("key,k", po::value<std::string>(&key)->required(), "raw key before MD5 derivation");
+        const auto values = Parse(arguments, options);
+        if (values.count("help"))
+        {
+            std::cout << options << '\n';
+            return 0;
+        }
+        if (command == "decrypt")
+            bmt::DecryptBFFile(input, output, key);
+        else if (command == "encrypt")
+            bmt::EncryptBFFile(input, output, key);
+        else
+            throw std::runtime_error("unknown bfcodec command " + std::string(command));
+        return 0;
     }
 
     int RunMulist(std::string_view command, const std::vector<std::string>& arguments)
@@ -354,6 +382,8 @@ int main(int argc, char** argv)
         const std::string_view group = argv[1];
         const std::string_view command = argv[2];
         const auto arguments = Arguments(argc, argv, 3);
+        if (group == "bfcodec")
+            return RunBFCodec(command, arguments);
         if (group == "dlc")
             return RunDLC(command, arguments);
         if (group == "mulist")
