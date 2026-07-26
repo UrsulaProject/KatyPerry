@@ -30,6 +30,7 @@ namespace
 {
     constexpr std::string_view IPadKey = "Konami Bemani Mobile iPad";
     constexpr std::string_view IOSKey = "Konami Bemani Mobile iOS";
+    constexpr uint32_t MinimumUnpaddedRuntimeID = 100000000;
     constexpr std::array<std::string_view, 12> JBHotTypes = {
         "marker", "info", "infoV2", "seqBas", "seqAdv", "seqExt",
         "bgm", "index", "smallArtwork", "artwork", "nameBlack", "nameWhite"
@@ -636,6 +637,14 @@ namespace
         return id;
     }
 
+    uint32_t ParseMappingSourceID(std::string_view value)
+    {
+        if (value.size() > 1 && value.front() == '0')
+            throw std::runtime_error("mapping.json source ID must not contain leading zeros: " +
+                                     std::string(value));
+        return ParseMappingID(value, "mapping.json source ID");
+    }
+
     IDMapping LoadIDMapping(const fs::path& directory)
     {
         const fs::path path = directory / "mapping.json";
@@ -651,7 +660,7 @@ namespace
         std::set<uint32_t> targets;
         for (const auto& [key, value] : root.items())
         {
-            const uint32_t oldID = ParseMappingID(key, "mapping.json source ID");
+            const uint32_t oldID = ParseMappingSourceID(key);
             if (!value.is_number_integer() && !value.is_number_unsigned())
                 throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
                                          " must be an integer");
@@ -670,6 +679,9 @@ namespace
                 throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
                                          " is outside the valid ID range");
             const uint32_t newID = static_cast<uint32_t>(rawTarget);
+            if (newID < MinimumUnpaddedRuntimeID)
+                throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
+                                         " must be an unpadded ID of at least nine digits");
             if (!mapping.emplace(oldID, newID).second)
                 throw std::runtime_error("mapping.json contains the source ID more than once: " +
                                          std::to_string(oldID));
@@ -678,6 +690,28 @@ namespace
                                          std::to_string(newID));
         }
         return mapping;
+    }
+
+    void ValidateRuntimeIDs(const bmt::PackTable& packs)
+    {
+        for (const auto& [id, instances] : packs)
+        {
+            if (id >= MinimumUnpaddedRuntimeID)
+                continue;
+            const auto invalid = std::find_if(instances.begin(), instances.end(),
+                                              [](const bmt::MusicPack& pack)
+                                              {
+                                                  return pack.dlcType != bmt::DLCType::Official;
+                                              });
+            if (invalid == instances.end())
+                continue;
+            const uint32_t sourceID = invalid->sourceFileID ? invalid->sourceFileID
+                                                            : invalid->originalID;
+            throw std::runtime_error(
+                "non-Official final ID " + std::to_string(id) +
+                " must be at least nine digits; add a mapping.json entry for source file ID " +
+                std::to_string(sourceID));
+        }
     }
 
     uint32_t MappedID(const IDMapping& mapping, uint32_t id)
@@ -1407,6 +1441,7 @@ namespace bmt
             ApplyIDMapping(sourceResult, mapping, source.directory);
             MergeDLC(result, sourceResult, source.directory);
         }
+        ValidateRuntimeIDs(result.packs);
         return result;
     }
 
@@ -1480,6 +1515,7 @@ namespace bmt
                                 const bmt::ExportOptions& options,
                                 std::vector<Diagnostic>& warnings)
     {
+        ValidateRuntimeIDs(packs);
         const auto catalog = BuildOfficialCatalog(packs, warnings);
         const auto playlistData = playlists ? BuildOfficialPlaylists(*playlists) : std::vector<uint8_t>{};
         for (auto& [id, instances] : packs)

@@ -168,6 +168,33 @@ int RunTests()
     std::filesystem::path outputName(u8"bmt-tests-测试-");
     outputName += std::to_string(unique);
     const std::filesystem::path output = std::filesystem::temp_directory_path() / outputName;
+
+    bmt::LoadResult lowCustomResult;
+    bmt::MusicPack lowCustomPack;
+    lowCustomPack.originalID = lowCustomPack.id = 12345678;
+    SetContent(lowCustomPack, {1});
+    lowCustomResult.packs[lowCustomPack.id].push_back(std::move(lowCustomPack));
+    bool rejectedLowCustomID = false;
+    try
+    {
+        bmt::ExportPacks(lowCustomResult, output / "low-custom");
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedLowCustomID =
+            std::string_view(error.what()).find("at least nine digits") != std::string_view::npos;
+    }
+    assert(rejectedLowCustomID);
+
+    bmt::LoadResult lowOfficialResult;
+    bmt::MusicPack lowOfficialPack;
+    lowOfficialPack.originalID = lowOfficialPack.id = 12345678;
+    lowOfficialPack.dlcType = bmt::DLCType::Official;
+    SetContent(lowOfficialPack, {2});
+    lowOfficialResult.packs[lowOfficialPack.id].push_back(std::move(lowOfficialPack));
+    bmt::ExportPacks(lowOfficialResult, output / "low-official");
+    assert(std::filesystem::is_regular_file(output / "low-official" / "012345678.jbt"));
+
     bmt::LoadResult exportResult;
     auto& exportPacks = exportResult.packs;
     bmt::MusicPack exportPack;
@@ -387,6 +414,37 @@ int RunTests()
     assert(mappedLoaded.remaps.front().newID == 223456789);
     assert(mappedLoaded.playlists.size() == 1);
     assert(mappedLoaded.playlists.front().musicIDs == (std::vector<uint32_t>{223456789}));
+
+    WriteText(conflictingDirectory / "mapping.json", "{\n  \"123456789\": 23456789\n}\n");
+    bool rejectedLowMappingTarget = false;
+    try
+    {
+        (void)bmt::LoadPacks(
+            {{bmt::DLCType::Custom, conflictingDirectory}},
+            {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedLowMappingTarget =
+            std::string_view(error.what()).find("at least nine digits") != std::string_view::npos;
+    }
+    assert(rejectedLowMappingTarget);
+
+    WriteText(conflictingDirectory / "mapping.json", "{\n  \"012345678\": 223456789\n}\n");
+    bool rejectedPaddedMappingSource = false;
+    try
+    {
+        (void)bmt::LoadPacks(
+            {{bmt::DLCType::Custom, conflictingDirectory}},
+            {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedPaddedMappingSource =
+            std::string_view(error.what()).find("leading zeros") != std::string_view::npos;
+    }
+    assert(rejectedPaddedMappingSource);
+    WriteText(conflictingDirectory / "mapping.json", "{\n  \"123456789\": 223456789\n}\n");
 
     const auto duplicateDirectory = output / "duplicate-source";
     std::filesystem::create_directory(duplicateDirectory);
