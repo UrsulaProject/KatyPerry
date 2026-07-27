@@ -138,8 +138,9 @@ RB 映射的 key 同样是源 `.rb` 文件名中的无前导零数字 ID，value
   `--jbhot-plist <defaults.plist>`。
 - `--custom-dir <目录>`：自定义 DLC，可重复传入。目录里的 JBT 可以是明文或
   官方加密格式。
-- `--catalog <mulist.plist>`：显式指定官方明文 catalog。未指定时，每个非 Hot
-  源会自动读取自己根目录里的 `mulist.plist`。
+
+Official 和 Custom Loader 都会自动读取各自根目录里的 `mulist.plist` 与
+`playlists.plist`，无需另外传入列表路径。
 
 每个 DLC 目录只扫描根目录中的 `*.jbt`。可选伴随文件为 `mulist.plist`、
 `playlists.plist` 和 `mapping.json`。
@@ -589,12 +590,6 @@ plist，应直接放在最终 Marker 目录中。Tweak 读取该文件并调用�
   --output "/path/to/OUT" \
   --encrypt-jbt=true \
   --mulist-key SHARED_KEY
-```
-
-如果官方 `mulist.plist` 不在官方 JBT 目录里，额外添加：
-
-```text
---catalog "/path/to/official-mulist.plist"
 ```
 
 要再加入自己的 JBT DLC，在同一命令末尾重复添加：

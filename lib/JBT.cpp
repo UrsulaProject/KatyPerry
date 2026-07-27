@@ -496,14 +496,9 @@ namespace
     }
 
     void ApplyCatalog(bmt::LoadResult& result,
-                      const std::vector<bmt::CatalogEntry>& explicitCatalog,
                       const std::unordered_map<size_t, CatalogMap>& catalogsByDLC,
-                      const JBHotMap& musicData,
-                      bool hasExplicitCatalog)
+                      const JBHotMap& musicData)
     {
-        std::unordered_map<uint32_t, const bmt::CatalogEntry*> officialByID;
-        for (const auto& entry : explicitCatalog)
-            officialByID.try_emplace(entry.id, &entry);
         for (auto& [id, instances] : result.packs)
         {
             for (auto& pack : instances)
@@ -512,7 +507,6 @@ namespace
                                                ? id
                                                : pack.sourceFileID;
                 const auto jbhot = musicData.find(catalogID);
-                const auto official = officialByID.find(catalogID);
                 if (pack.dlcType == bmt::DLCType::JBHot && jbhot != musicData.end())
                 {
                     ApplyCatalogEntry(pack, jbhot->second.catalog);
@@ -522,11 +516,6 @@ namespace
                          dlc != catalogsByDLC.end() && dlc->second.contains(catalogID))
                 {
                     ApplyCatalogEntry(pack, dlc->second.at(catalogID));
-                    pack.catalogSource = bmt::CatalogSource::Official;
-                }
-                else if (hasExplicitCatalog && official != officialByID.end())
-                {
-                    ApplyCatalogEntry(pack, *official->second);
                     pack.catalogSource = bmt::CatalogSource::Official;
                 }
             }
@@ -1284,28 +1273,20 @@ namespace bmt
         }
         auto musicData = std::make_shared<JBHotMap>(std::move(jbhotDefaults.music));
 
-        std::vector<CatalogEntry> officialCatalog;
         std::unordered_map<size_t, CatalogMap> catalogsByDLC;
-        if (options.catalogPlist)
+        for (size_t sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex)
         {
-            officialCatalog = LoadOfficialCatalog(*options.catalogPlist);
-            result.catalog.insert(result.catalog.end(), officialCatalog.begin(), officialCatalog.end());
-        }
-        else
-        {
-            for (size_t sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex)
-            {
-                const auto& source = sources[sourceIndex];
-                const fs::path companion = source.directory / "mulist.plist";
-                if (fs::is_regular_file(companion))
-                {
-                    auto entries = LoadOfficialCatalog(companion);
-                    auto& catalog = catalogsByDLC[sourceIndex];
-                    for (const auto& entry : entries)
-                        catalog[entry.id] = entry;
-                    result.catalog.insert(result.catalog.end(), entries.begin(), entries.end());
-                }
-            }
+            const auto& source = sources[sourceIndex];
+            if (source.type == DLCType::JBHot)
+                continue;
+            const fs::path companion = source.directory / "mulist.plist";
+            if (!fs::is_regular_file(companion))
+                continue;
+            auto entries = LoadOfficialCatalog(companion);
+            auto& catalog = catalogsByDLC[sourceIndex];
+            for (const auto& entry : entries)
+                catalog[entry.id] = entry;
+            result.catalog.insert(result.catalog.end(), entries.begin(), entries.end());
         }
 
         for (size_t sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex)
@@ -1346,8 +1327,7 @@ namespace bmt
             std::unordered_map<size_t, CatalogMap> sourceCatalog;
             if (const auto found = catalogsByDLC.find(sourceIndex); found != catalogsByDLC.end())
                 sourceCatalog.emplace(sourceIndex, found->second);
-            ApplyCatalog(sourceResult, officialCatalog, sourceCatalog, *musicData,
-                         options.catalogPlist.has_value());
+            ApplyCatalog(sourceResult, sourceCatalog, *musicData);
             const auto mapping =
                 bmt::detail::LoadIDMapping(source.directory, MinimumUnpaddedRuntimeID);
             ApplyIDMapping(sourceResult, mapping, source.directory);

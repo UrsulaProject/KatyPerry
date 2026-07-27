@@ -208,7 +208,6 @@ namespace
         fs::path official;
         fs::path jbhot;
         fs::path defaults;
-        fs::path catalog;
         fs::path output;
         std::vector<fs::path> custom;
         bool eager = false;
@@ -223,7 +222,6 @@ namespace
             ("jbhot", po::value<fs::path>(&jbhot), "JBHot DLC directory")
             ("jbhot-plist", po::value<fs::path>(&defaults), "encrypted JBHot defaults plist")
             ("custom-dir", po::value<std::vector<fs::path>>(&custom)->composing(), "Custom DLC directory; repeatable")
-            ("catalog", po::value<fs::path>(&catalog), "official plaintext mulist plist")
             ("output,o", po::value<fs::path>(&output)->required(), "output directory")
             ("eager", po::bool_switch(&eager), "materialize every resource while loading")
             ("strict", po::bool_switch(&strict), "stop at the first invalid pack")
@@ -252,8 +250,6 @@ namespace
         load.failureMode = strict ? bmt::FailureMode::Strict : bmt::FailureMode::Continue;
         if (!defaults.empty())
             load.jbhotDefaultsPlist = defaults;
-        if (!catalog.empty())
-            load.catalogPlist = catalog;
         auto result = bmt::LoadPacks(sources, load);
         bmt::ExportOptions exportOptions;
         exportOptions.encryptJBT = encryptJBT;

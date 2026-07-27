@@ -132,7 +132,6 @@ namespace bmt
         LoadMode mode = LoadMode::Lazy;
         FailureMode failureMode = FailureMode::Continue;
         std::optional<std::filesystem::path> jbhotDefaultsPlist;
-        std::optional<std::filesystem::path> catalogPlist;
     };
 
     struct DLCSource

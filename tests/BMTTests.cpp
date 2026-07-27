@@ -662,6 +662,24 @@ int RunTests()
                        }));
     assert(reloadedPlaylists.back().musicIDs == (std::vector<uint32_t>{100, 200}));
 
+    const auto officialCompanionDirectory = output / "official-companions";
+    std::filesystem::create_directory(officialCompanionDirectory);
+    std::filesystem::copy_file(output / "123456789.jbt",
+                               officialCompanionDirectory / "123456789.jbt");
+    std::filesystem::copy_file(output / "mulist.plist",
+                               officialCompanionDirectory / "mulist.plist");
+    std::filesystem::copy_file(output / "playlist-export" / "playlists.plist",
+                               officialCompanionDirectory / "playlists.plist");
+    auto officialCompanions = bmt::LoadPacks(
+        {{bmt::DLCType::Official, officialCompanionDirectory}},
+        {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(officialCompanions.packs.size() == 1);
+    assert(officialCompanions.packs.at(123456789).front().catalogSource ==
+           bmt::CatalogSource::Official);
+    assert(officialCompanions.catalog.size() == 5);
+    assert(officialCompanions.playlists.size() == 2);
+    assert(officialCompanions.playlists.front().name == "JBHot songs");
+
     const auto separateOutput = output / "separate-export";
     bmt::ExportPacks(playlistConflict, separateOutput, {.separateByDLC = true});
     assert(std::filesystem::is_regular_file(separateOutput / "official" / "000000100.jbt"));
