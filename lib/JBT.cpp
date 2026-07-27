@@ -4,6 +4,7 @@
 
 #include "FileSupport.h"
 #include "CryptoSupport.h"
+#include "PackageSupport.h"
 #include "ZipSupport.h"
 #include "PlistSupport.h"
 
@@ -539,50 +540,23 @@ namespace
         return name == "info" || name == "infov2" || name == "infov3";
     }
 
-    struct DigestContextDeleter
-    {
-        void operator()(EVP_MD_CTX* context) const noexcept
-        {
-            EVP_MD_CTX_free(context);
-        }
-    };
-
-    using DigestContextPtr = std::unique_ptr<EVP_MD_CTX, DigestContextDeleter>;
-
-    void DigestLength(EVP_MD_CTX* context, uint64_t length)
-    {
-        std::array<uint8_t, 8> encoded{};
-        for (size_t index = 0; index < encoded.size(); ++index)
-            encoded[index] = static_cast<uint8_t>(length >> ((encoded.size() - index - 1) * 8));
-        if (EVP_DigestUpdate(context, encoded.data(), encoded.size()) != 1)
-            throw std::runtime_error("cannot update JBT content hash");
-    }
-
     std::array<uint8_t, 32> PackContentHash(bmt::MusicPack& pack)
     {
-        DigestContextPtr context(EVP_MD_CTX_new());
-        if (!context || EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) != 1)
-            throw std::runtime_error("cannot initialize JBT content hash");
+        std::vector<bmt::detail::NamedByteSpan> resources;
+        std::vector<bmt::PackResource*> transient;
         for (auto& [name, resource] : pack.resources)
         {
             if (IsInfoMember(name))
                 continue;
-            DigestLength(context.get(), name.size());
-            if (EVP_DigestUpdate(context.get(), name.data(), name.size()) != 1)
-                throw std::runtime_error("cannot update JBT content hash");
             const bool wasMaterialized = resource.IsMaterialized();
             const auto& data = resource.Data();
-            DigestLength(context.get(), data.size());
-            if (EVP_DigestUpdate(context.get(), data.data(), data.size()) != 1)
-                throw std::runtime_error("cannot update JBT content hash");
             if (!wasMaterialized)
-                resource.bytes.reset();
+                transient.push_back(&resource);
+            resources.push_back({name, data});
         }
-        std::array<uint8_t, 32> digest{};
-        unsigned int digestLength = 0;
-        if (EVP_DigestFinal_ex(context.get(), digest.data(), &digestLength) != 1 ||
-            digestLength != digest.size())
-            throw std::runtime_error("cannot finalize JBT content hash");
+        const auto digest = bmt::detail::NamedContentHash(resources, "JBT");
+        for (auto* resource : transient)
+            resource->bytes.reset();
         return digest;
     }
 
@@ -627,7 +601,7 @@ namespace
         resource->second.lazyLoader = {};
     }
 
-    using IDMapping = std::map<uint32_t, uint32_t>;
+    using IDMapping = bmt::detail::IDMapping;
 
     uint32_t ParseMappingID(std::string_view value, std::string_view context)
     {
@@ -635,61 +609,6 @@ namespace
         if (!id)
             throw std::runtime_error(std::string(context) + " must not be zero");
         return id;
-    }
-
-    uint32_t ParseMappingSourceID(std::string_view value)
-    {
-        if (value.size() > 1 && value.front() == '0')
-            throw std::runtime_error("mapping.json source ID must not contain leading zeros: " +
-                                     std::string(value));
-        return ParseMappingID(value, "mapping.json source ID");
-    }
-
-    IDMapping LoadIDMapping(const fs::path& directory)
-    {
-        const fs::path path = directory / "mapping.json";
-        if (!fs::exists(path))
-            return {};
-        if (!fs::is_regular_file(path))
-            throw std::runtime_error("mapping.json is not a regular file: " + path.string());
-        auto root = ParseJson(ReadFile(path));
-        if (!root.is_object())
-            throw std::runtime_error("mapping.json root must be an object: " + path.string());
-
-        IDMapping mapping;
-        std::set<uint32_t> targets;
-        for (const auto& [key, value] : root.items())
-        {
-            const uint32_t oldID = ParseMappingSourceID(key);
-            if (!value.is_number_integer() && !value.is_number_unsigned())
-                throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
-                                         " must be an integer");
-            uint64_t rawTarget = 0;
-            if (value.is_number_unsigned())
-                rawTarget = value.get<uint64_t>();
-            else
-            {
-                const int64_t signedTarget = value.get<int64_t>();
-                if (signedTarget <= 0)
-                    throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
-                                             " is outside the valid ID range");
-                rawTarget = static_cast<uint64_t>(signedTarget);
-            }
-            if (!rawTarget || rawTarget > std::numeric_limits<uint32_t>::max())
-                throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
-                                         " is outside the valid ID range");
-            const uint32_t newID = static_cast<uint32_t>(rawTarget);
-            if (newID < MinimumUnpaddedRuntimeID)
-                throw std::runtime_error("mapping.json target for " + std::to_string(oldID) +
-                                         " must be an unpadded ID of at least nine digits");
-            if (!mapping.emplace(oldID, newID).second)
-                throw std::runtime_error("mapping.json contains the source ID more than once: " +
-                                         std::to_string(oldID));
-            if (!targets.insert(newID).second)
-                throw std::runtime_error("mapping.json maps multiple source IDs to " +
-                                         std::to_string(newID));
-        }
-        return mapping;
     }
 
     void ValidateRuntimeIDs(const bmt::PackTable& packs)
@@ -714,12 +633,6 @@ namespace
         }
     }
 
-    uint32_t MappedID(const IDMapping& mapping, uint32_t id)
-    {
-        const auto found = mapping.find(id);
-        return found == mapping.end() ? id : found->second;
-    }
-
     void ApplyIDMapping(bmt::LoadResult& sourceResult,
                         const IDMapping& mapping,
                         const fs::path& sourceDirectory)
@@ -736,12 +649,13 @@ namespace
             for (auto& instance : instances)
             {
                 auto pack = std::move(instance);
-                const uint32_t finalID = MappedID(mapping, pack.sourceFileID);
+                const uint32_t finalID =
+                    bmt::detail::MappedID(mapping, pack.sourceFileID);
                 pack.id = finalID == pack.sourceFileID && !mapping.contains(pack.sourceFileID)
                               ? pack.originalID
                               : finalID;
-                pack.extID = MappedID(mapping, pack.extID);
-                pack.baseID = MappedID(mapping, pack.baseID);
+                pack.extID = bmt::detail::MappedID(mapping, pack.extID);
+                pack.baseID = bmt::detail::MappedID(mapping, pack.baseID);
                 if (pack.id != pack.originalID)
                 {
                     sourceResult.remaps.push_back({pack.sourcePath, pack.originalID, pack.id});
@@ -783,7 +697,7 @@ namespace
         for (auto& playlist : sourceResult.playlists)
         {
             for (auto& id : playlist.musicIDs)
-                id = MappedID(mapping, id);
+                id = bmt::detail::MappedID(mapping, id);
         }
     }
 
@@ -1268,10 +1182,8 @@ namespace bmt
     {
         if (key.empty())
             throw std::runtime_error("mulist key must not be empty");
-        auto plaintext = DecryptBFContainer(ReadFile(encryptedPath), key);
-        if (plaintext.size() < 4)
-            throw std::runtime_error("decrypted mulist is missing its four-byte prefix");
-        plaintext.erase(plaintext.begin(), plaintext.begin() + 4);
+        auto plaintext =
+            bmt::detail::DecryptPrefixedBFContainer(ReadFile(encryptedPath), key);
         auto validation = ParsePlist(plaintext);
         if (plist_get_node_type(validation.get()) != PLIST_ARRAY)
             throw std::runtime_error("decrypted mulist is not a plist array");
@@ -1287,8 +1199,7 @@ namespace bmt
         auto validation = ParsePlist(plaintext);
         if (plist_get_node_type(validation.get()) != PLIST_ARRAY)
             throw std::runtime_error("mulist plaintext is not a plist array");
-        const auto prefixed = bmt::detail::PrependRandomBytes(plaintext, 4);
-        return EncryptBFContainer(prefixed, key);
+        return bmt::detail::EncryptPrefixedBFContainer(plaintext, key);
     }
 
     std::map<std::string, std::string> DumpJBHotDefaults(const fs::path& defaultsPlist)
@@ -1437,7 +1348,8 @@ namespace bmt
                 sourceCatalog.emplace(sourceIndex, found->second);
             ApplyCatalog(sourceResult, officialCatalog, sourceCatalog, *musicData,
                          options.catalogPlist.has_value());
-            const auto mapping = LoadIDMapping(source.directory);
+            const auto mapping =
+                bmt::detail::LoadIDMapping(source.directory, MinimumUnpaddedRuntimeID);
             ApplyIDMapping(sourceResult, mapping, source.directory);
             MergeDLC(result, sourceResult, source.directory);
         }
@@ -1575,8 +1487,8 @@ namespace bmt
         WriteFile(outputDirectory / "mulist.plist", catalog);
         if (options.mulistKey)
         {
-            const auto prefixedCatalog = bmt::detail::PrependRandomBytes(catalog, 4);
-            const auto encryptedCatalog = bmt::EncryptBFContainer(prefixedCatalog, *options.mulistKey);
+            const auto encryptedCatalog =
+                bmt::detail::EncryptPrefixedBFContainer(catalog, *options.mulistKey);
             WriteFile(outputDirectory / "mulist", encryptedCatalog);
         }
         if (playlists && !playlists->empty())
