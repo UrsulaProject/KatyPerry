@@ -347,6 +347,33 @@ JSON。
   --decode-type 0
 ```
 
+### `.rb` 的 MusicData 资源模型
+
+`info` 是 plist dictionary。库显式读取原版 `MusicData` 使用的
+`ID/MusicName/MusicNameHira/MusicNameRoman/ArtistName/ArtistNameHira/
+ArtistNameRoman/Basic/Medium/Hard/BpmMin/BpmMax`，并保留 `Version`、
+`Options` 和所有未知字段的原始 plist。标准 ZIP 成员如下：
+
+| 资源 | 通用/常规成员 | 难度或 Light 成员 | 原版回退 |
+| --- | --- | --- | --- |
+| 完整音频 | `bgm` | `bgm_b`、`bgm_m`、`bgm_h` | `bgm` |
+| 试听音频 | `pre` | 无 | 无 |
+| 谱面 | `note_bas`、`note_med`、`note_har` | `note_bas2`、`note_med2`、`note_har2` | 对应的常规谱面 |
+| 封面 | `artwork`、`artwork2x` | 在成员末尾加 `_b/_m/_h` | 无 |
+| 黑/白曲名 | `title_b`、`title_w`、`title_b2x`、`title_w2x` | 在成员末尾加 `_b/_m/_h` | 无 |
+| 黑/白作者 | `artist_b`、`artist_w`、`artist_b2x`、`artist_w2x` | 在成员末尾加 `_b/_m/_h` | 无 |
+
+表中的每个难度/Light 成员都由 `info.Options` 的同名 key 启用。原版只检查 key
+是否存在，不检查 value；key 存在但成员读取失败时，仅音频和 Light 谱面会使用表中
+的回退成员。Brown 曲名/作者图是原版运行时由 White 图着色生成的，不是额外 ZIP
+成员。SPECIAL 谱面来自 nolist 指向的独立 ext `.rb`，原版将 ext 包的
+`note_bas`/`note_bas2` 当作主曲的 Special/Light Special。
+
+公共 API 的 `SelectRBAudioResource`、`SelectRBPreviewResource`、
+`SelectRBNoteResource`、`SelectRBImageResource` 和 `ResolveRBResource`
+复刻上述选择规则。未列出的 ZIP 成员仍保留在 `RBMusicPack.resources`，并参与
+去重、解包和重打包。
+
 ### `rb build`
 
 统一加载并合并 REFLEC BEAT DLC：

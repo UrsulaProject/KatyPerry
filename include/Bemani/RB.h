@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +27,37 @@ namespace bmt
         Preserve,
         Type0,
         Type1,
+    };
+
+    enum class RBDifficulty : uint8_t
+    {
+        Basic,
+        Medium,
+        Hard,
+    };
+
+    enum class RBImageKind : uint8_t
+    {
+        Artwork,
+        TitleBlack,
+        ArtistBlack,
+        TitleWhite,
+        ArtistWhite,
+    };
+
+    enum class RBImageScale : uint8_t
+    {
+        OneX,
+        TwoX,
+    };
+
+    // Describes one MusicData ZIP lookup. optionKey models the exact
+    // objectForKey: gate used by getOptionalZipData:withDefaultName:.
+    struct RBResourceSelection
+    {
+        std::string memberName;
+        std::optional<std::string> fallbackMemberName;
+        std::optional<std::string> optionKey;
     };
 
     struct RBCatalogEntry
@@ -71,11 +104,28 @@ namespace bmt
         uint32_t hard = 0;
         uint32_t bpmMin = 0;
         uint32_t bpmMax = 0;
+        std::optional<uint32_t> version;
+        // MusicData treats the keys in info.Options as alternate ZIP member names.
+        // The complete plist remains in resources["info"], including option values
+        // and any unknown metadata.
+        std::set<std::string> options;
         uint32_t hotMainID = 0;
         std::map<std::string, PackResource> resources;
     };
 
     using RBPackTable = std::map<uint32_t, std::vector<RBMusicPack>>;
+
+    RBResourceSelection SelectRBAudioResource(
+        std::optional<RBDifficulty> difficulty = std::nullopt);
+    RBResourceSelection SelectRBPreviewResource();
+    RBResourceSelection SelectRBNoteResource(RBDifficulty difficulty,
+                                             bool light);
+    RBResourceSelection SelectRBImageResource(
+        RBImageKind kind,
+        RBImageScale scale,
+        std::optional<RBDifficulty> difficulty = std::nullopt);
+    const PackResource* ResolveRBResource(const RBMusicPack& pack,
+                                          const RBResourceSelection& selection);
 
     struct RBLoadOptions
     {

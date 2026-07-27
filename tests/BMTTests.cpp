@@ -844,10 +844,20 @@ int RunTests()
         "<key>Hard</key><integer>9</integer>"
         "<key>BpmMin</key><integer>120</integer>"
         "<key>BpmMax</key><integer>180</integer>"
-        "<key>Options</key><dict><key>Unknown</key><true/></dict>"
+        "<key>Version</key><integer>2</integer>"
+        "<key>Options</key><dict>"
+        "<key>note_har2</key><integer>1</integer>"
+        "<key>Unknown</key><true/>"
+        "</dict>"
         "</dict></plist>";
     WriteText(rbExpanded / "info", rbInfo);
+    WriteBytes(rbExpanded / "bgm", {'M', '4', 'A', ' ', 1, 2, 3, 4});
+    WriteBytes(rbExpanded / "pre", {'M', '4', 'A', ' ', 5, 6, 7, 8});
     WriteBytes(rbExpanded / "note_bas", {'R', 'B', 'F', 'F', 1, 2, 3, 4});
+    WriteBytes(rbExpanded / "note_med", {'R', 'B', 'F', 'F', 2, 3, 4, 5});
+    WriteBytes(rbExpanded / "note_har", {'R', 'B', 'F', 'F', 3, 4, 5, 6});
+    WriteBytes(rbExpanded / "note_har2", {'R', 'B', 'F', 'F', 5, 6, 7, 8});
+    WriteBytes(rbExpanded / "artwork", tinyPNG);
     WriteBytes(rbExpanded / "unknown/member", {9, 8, 7, 6});
 
     const auto rbPlain = rbRoot / "123456789.rb";
@@ -856,6 +866,38 @@ int RunTests()
     assert(ReadZipEntry(rbPlain, "info") == ReadBytes(rbExpanded / "info"));
     assert(ReadZipEntry(rbPlain, "unknown/member") ==
            ReadBytes(rbExpanded / "unknown/member"));
+    const auto typedRB = bmt::LoadRBPacks(
+        {{bmt::DLCType::Official, rbRoot}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict});
+    assert(typedRB.packs.at(123456789).front().version == 2);
+    assert(typedRB.packs.at(123456789).front().options.contains("note_har2"));
+    assert(typedRB.packs.at(123456789).front().options.contains("Unknown"));
+    assert(typedRB.packs.at(123456789).front().resources.at("note_har2").Data() ==
+           ReadBytes(rbExpanded / "note_har2"));
+    const auto& typedPack = typedRB.packs.at(123456789).front();
+    const auto* hardLight = bmt::ResolveRBResource(
+        typedPack,
+        bmt::SelectRBNoteResource(bmt::RBDifficulty::Hard, true));
+    assert(hardLight && hardLight->name == "note_har2");
+    const auto* mediumLight = bmt::ResolveRBResource(
+        typedPack,
+        bmt::SelectRBNoteResource(bmt::RBDifficulty::Medium, true));
+    assert(mediumLight && mediumLight->name == "note_med");
+    const auto* mediumMusic = bmt::ResolveRBResource(
+        typedPack,
+        bmt::SelectRBAudioResource(bmt::RBDifficulty::Medium));
+    assert(mediumMusic && mediumMusic->name == "bgm");
+    const auto* commonArtwork = bmt::ResolveRBResource(
+        typedPack,
+        bmt::SelectRBImageResource(
+            bmt::RBImageKind::Artwork, bmt::RBImageScale::OneX));
+    assert(commonArtwork && commonArtwork->name == "artwork");
+    assert(!bmt::ResolveRBResource(
+        typedPack,
+        bmt::SelectRBImageResource(
+            bmt::RBImageKind::Artwork, bmt::RBImageScale::OneX,
+            bmt::RBDifficulty::Basic)));
 
     const auto paddedRBDirectory = rbRoot / "padded-id";
     std::filesystem::create_directories(paddedRBDirectory);
@@ -889,6 +931,7 @@ int RunTests()
         bmt::UnpackRB(encryptedRB, unpacked);
         assert(ReadBytes(unpacked / "info") == ReadBytes(rbExpanded / "info"));
         assert(ReadBytes(unpacked / "note_bas") == ReadBytes(rbExpanded / "note_bas"));
+        assert(ReadBytes(unpacked / "note_har2") == ReadBytes(rbExpanded / "note_har2"));
         assert(ReadBytes(unpacked / "unknown/member") ==
                ReadBytes(rbExpanded / "unknown/member"));
 
@@ -905,6 +948,8 @@ int RunTests()
             rbRoot / (std::string("roundtrip-") + std::to_string(decodeType));
         bmt::UnpackRB(reencryptedRB, roundTrip);
         assert(ReadBytes(roundTrip / "info") == ReadBytes(rbExpanded / "info"));
+        assert(ReadBytes(roundTrip / "note_har2") ==
+               ReadBytes(rbExpanded / "note_har2"));
         assert(ReadBytes(roundTrip / "unknown/member") ==
                ReadBytes(rbExpanded / "unknown/member"));
     }

@@ -15,6 +15,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iterator>
@@ -436,6 +437,25 @@ namespace
         pack.hard = PlistUInt(info.get(), "Hard");
         pack.bpmMin = PlistUInt(info.get(), "BpmMin");
         pack.bpmMax = PlistUInt(info.get(), "BpmMax");
+        if (plist_dict_get_item(info.get(), "Version"))
+            pack.version = PlistUInt(info.get(), "Version");
+        if (plist_t options = plist_dict_get_item(info.get(), "Options");
+            options && plist_get_node_type(options) == PLIST_DICT)
+        {
+            plist_dict_iter iterator = nullptr;
+            plist_dict_new_iter(options, &iterator);
+            while (iterator)
+            {
+                char* key = nullptr;
+                plist_t value = nullptr;
+                plist_dict_next_item(options, iterator, &key, &value);
+                if (!key)
+                    break;
+                pack.options.emplace(key);
+                std::free(key);
+            }
+            std::free(iterator);
+        }
     }
 
     std::optional<uint8_t> DetectOfficialType(const std::vector<uint8_t>& encryptedInfo,
@@ -660,6 +680,118 @@ namespace
 
 namespace bmt
 {
+    namespace
+    {
+        std::string_view RBDifficultySuffix(RBDifficulty difficulty)
+        {
+            switch (difficulty)
+            {
+            case RBDifficulty::Basic:
+                return "b";
+            case RBDifficulty::Medium:
+                return "m";
+            case RBDifficulty::Hard:
+                return "h";
+            }
+            throw std::invalid_argument("unknown RB difficulty");
+        }
+
+        std::string_view RBNoteName(RBDifficulty difficulty)
+        {
+            switch (difficulty)
+            {
+            case RBDifficulty::Basic:
+                return "note_bas";
+            case RBDifficulty::Medium:
+                return "note_med";
+            case RBDifficulty::Hard:
+                return "note_har";
+            }
+            throw std::invalid_argument("unknown RB difficulty");
+        }
+
+        std::string_view RBImageName(RBImageKind kind)
+        {
+            switch (kind)
+            {
+            case RBImageKind::Artwork:
+                return "artwork";
+            case RBImageKind::TitleBlack:
+                return "title_b";
+            case RBImageKind::ArtistBlack:
+                return "artist_b";
+            case RBImageKind::TitleWhite:
+                return "title_w";
+            case RBImageKind::ArtistWhite:
+                return "artist_w";
+            }
+            throw std::invalid_argument("unknown RB image kind");
+        }
+    }
+
+    RBResourceSelection SelectRBAudioResource(
+        std::optional<RBDifficulty> difficulty)
+    {
+        if (!difficulty)
+            return {"bgm", std::nullopt, std::nullopt};
+        std::string member = "bgm_";
+        member += RBDifficultySuffix(*difficulty);
+        return {member, std::string("bgm"), member};
+    }
+
+    RBResourceSelection SelectRBPreviewResource()
+    {
+        return {"pre", std::nullopt, std::nullopt};
+    }
+
+    RBResourceSelection SelectRBNoteResource(RBDifficulty difficulty,
+                                             bool light)
+    {
+        std::string member(RBNoteName(difficulty));
+        if (!light)
+            return {member, std::nullopt, std::nullopt};
+        const std::string fallback = member;
+        member += "2";
+        return {member, fallback, member};
+    }
+
+    RBResourceSelection SelectRBImageResource(
+        RBImageKind kind,
+        RBImageScale scale,
+        std::optional<RBDifficulty> difficulty)
+    {
+        std::string member(RBImageName(kind));
+        if (scale == RBImageScale::TwoX)
+            member += "2x";
+        else if (scale != RBImageScale::OneX)
+            throw std::invalid_argument("unknown RB image scale");
+        if (!difficulty)
+            return {member, std::nullopt, std::nullopt};
+        member += "_";
+        member += RBDifficultySuffix(*difficulty);
+        return {member, std::nullopt, member};
+    }
+
+    const PackResource* ResolveRBResource(
+        const RBMusicPack& pack,
+        const RBResourceSelection& selection)
+    {
+        if (!selection.optionKey || pack.options.contains(*selection.optionKey))
+        {
+            const auto primary = pack.resources.find(selection.memberName);
+            if (primary != pack.resources.end())
+                return &primary->second;
+        }
+        if (selection.fallbackMemberName)
+        {
+            const auto fallback =
+                pack.resources.find(*selection.fallbackMemberName);
+            if (fallback != pack.resources.end())
+                return &fallback->second;
+        }
+        return nullptr;
+    }
+
     void DecryptRB(const fs::path& inputRB,
                    const fs::path& outputRB,
                    const RBLoadOptions& options)
