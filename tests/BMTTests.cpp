@@ -857,6 +857,134 @@ int RunTests()
     assert(rbReloaded.playlists.front().musicIDs ==
            (std::vector<uint32_t>{123456789, 123456790}));
 
+    const auto rbConflict = rbBuild / "custom-conflict";
+    const auto rbConflictExpanded = rbBuild / "custom-conflict-expanded";
+    WriteText(rbConflictExpanded / "info", rbInfo);
+    WriteBytes(rbConflictExpanded / "note_bas", {'R', 'B', 'F', 'F', 4, 3, 2, 1});
+    WriteBytes(rbConflictExpanded / "unknown/member", {1, 1, 2, 3});
+    bmt::PackRB(rbConflictExpanded, rbConflict / "123456789.rb", std::nullopt);
+    WriteText(rbConflict / "mapping.json", "{\"123456789\":223456789}\n");
+    WriteText(
+        rbConflict / "mulist.plist",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array><dict>"
+        "<key>ID</key><integer>123456789</integer>"
+        "<key>Name</key><string>Mapped Song</string>"
+        "<key>Artist</key><string>Mapped Artist</string>"
+        "</dict></array></plist>");
+    bmt::ExportPlaylists(
+        {{"abcdef0123456789abcdef0123456789", "Mapped Playlist", {123456789}}},
+        rbConflict / "playlist.plist");
+    auto rbMapped = bmt::LoadRBPacks({
+        {bmt::DLCType::Custom, rbConflict},
+        {bmt::DLCType::Official, rbOfficial},
+    }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(rbMapped.packs.size() == 3);
+    assert(rbMapped.packs.at(123456789).front().dlcType == bmt::DLCType::Official);
+    assert(rbMapped.packs.at(223456789).front().originalID == 123456789);
+    assert(rbMapped.packs.at(223456789).front().id == 223456789);
+    assert(rbMapped.remaps.size() == 1);
+    assert(std::find_if(
+               rbMapped.catalog.begin(), rbMapped.catalog.end(),
+               [](const bmt::RBCatalogEntry& entry)
+               {
+                   return entry.id == 223456789 && entry.name == "Mapped Song";
+               }) != rbMapped.catalog.end());
+    assert(std::find_if(
+               rbMapped.playlists.begin(), rbMapped.playlists.end(),
+               [](const bmt::Playlist& playlist)
+               {
+                   return playlist.name == "Mapped Playlist" &&
+                          playlist.musicIDs == (std::vector<uint32_t>{223456789});
+               }) != rbMapped.playlists.end());
+
+    const auto rbOrphan = rbBuild / "orphan";
+    std::filesystem::create_directories(rbOrphan);
+    std::filesystem::copy_file(rbOfficial / "123456790.rb",
+                               rbOrphan / "123456790.rb");
+    WriteText(
+        rbOrphan / "nolist.plist",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array><dict>"
+        "<key>ExtID</key><integer>123456790</integer>"
+        "<key>PackID</key><integer>7</integer>"
+        "<key>ID</key><integer>999999999</integer>"
+        "<key>ExtLevel</key><integer>3</integer>"
+        "</dict></array></plist>");
+    bool rejectedOrphan = false;
+    try
+    {
+        (void)bmt::LoadRBPacks(
+            {{bmt::DLCType::Custom, rbOrphan}},
+            {.mode = bmt::LoadMode::Eager,
+             .failureMode = bmt::FailureMode::Strict});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedOrphan =
+            std::string_view(error.what()).find("dangling nolist") !=
+            std::string_view::npos;
+    }
+    assert(rejectedOrphan);
+    auto retainedOrphan = bmt::LoadRBPacks(
+        {{bmt::DLCType::Custom, rbOrphan}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Continue});
+    assert(retainedOrphan.packs.size() == 1);
+    assert(!retainedOrphan.warnings.empty());
+    const auto rbOrphanOutput = rbBuild / "orphan-output";
+    bmt::ExportRBPacks(retainedOrphan, rbOrphanOutput,
+                       {.encryptRB = false});
+    assert(std::filesystem::is_regular_file(
+        rbOrphanOutput / "123456790.rb"));
+
+    const auto rbMulti = rbBuild / "one-to-many";
+    const std::array<uint32_t, 3> rbMultiIDs = {
+        323456789, 323456790, 323456791,
+    };
+    for (size_t index = 0; index < rbMultiIDs.size(); ++index)
+    {
+        const auto expanded = rbBuild / ("multi-expanded-" + std::to_string(index));
+        std::string info = rbInfo;
+        const auto position = info.find("123456789");
+        assert(position != std::string::npos);
+        info.replace(position, 9, std::to_string(rbMultiIDs[index]));
+        WriteText(expanded / "info", info);
+        WriteBytes(expanded / "note_bas",
+                   {'R', 'B', 'F', 'F', static_cast<uint8_t>(index)});
+        bmt::PackRB(expanded, rbMulti / (std::to_string(rbMultiIDs[index]) + ".rb"),
+                    uint8_t{0});
+    }
+    WriteText(
+        rbMulti / "nolist.plist",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array>"
+        "<dict><key>ExtID</key><integer>323456790</integer>"
+        "<key>PackID</key><integer>8</integer>"
+        "<key>ID</key><integer>323456789</integer>"
+        "<key>ExtLevel</key><integer>4</integer></dict>"
+        "<dict><key>ExtID</key><integer>323456791</integer>"
+        "<key>PackID</key><integer>8</integer>"
+        "<key>ID</key><integer>323456789</integer>"
+        "<key>ExtLevel</key><integer>5</integer></dict>"
+        "</array></plist>");
+    auto rbMultiLoaded = bmt::LoadRBPacks(
+        {{bmt::DLCType::Custom, rbMulti}},
+        {.mode = bmt::LoadMode::Lazy,
+         .failureMode = bmt::FailureMode::Strict});
+    assert(rbMultiLoaded.packs.size() == 3);
+    assert(rbMultiLoaded.extensions.size() == 2);
+    const auto rbMultiOutput = rbBuild / "one-to-many-output";
+    bmt::ExportRBPacks(rbMultiLoaded, rbMultiOutput,
+                       {.encryptRB = true,
+                        .outputKey = bmt::RBOutputKey::Type1});
+    auto rbMultiReloaded = bmt::LoadRBPacks(
+        {{bmt::DLCType::Official, rbMultiOutput}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict});
+    assert(rbMultiReloaded.packs.size() == 3);
+    assert(rbMultiReloaded.extensions.size() == 2);
+
     std::filesystem::remove_all(output);
 
     std::cout << "BMTTests passed\n";

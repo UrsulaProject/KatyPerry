@@ -218,7 +218,16 @@ namespace
             return;
         const auto& data = JsonData(source, "musicData");
         for (const auto& [key, value] : data.items())
-            destination[key] = value;
+        {
+            auto& target = destination[key];
+            if (target.is_object() && value.is_object())
+            {
+                for (const auto& [field, fieldValue] : value.items())
+                    target[field] = fieldValue;
+            }
+            else
+                target = value;
+        }
     }
 
     RBHotMap BuildRBHotMap(const Json& data)
@@ -1158,10 +1167,23 @@ namespace
     {
         using RelationKey = std::pair<uint32_t, uint32_t>;
         std::map<RelationKey, bmt::RBExtendRelation> relations;
+        std::map<uint32_t, uint32_t> baseByExtension;
         for (const auto& relation : result.extensions)
         {
             extensionIDs.insert(relation.extID);
             const RelationKey key{relation.baseID, relation.extID};
+            const auto owner = baseByExtension.find(relation.extID);
+            if (owner != baseByExtension.end() && owner->second != relation.baseID)
+            {
+                AddRBWarning(
+                    result, {},
+                    "omitting duplicate nolist owner " +
+                    std::to_string(relation.baseID) + " -> " +
+                    std::to_string(relation.extID) + "; extension is already owned by " +
+                    std::to_string(owner->second));
+                continue;
+            }
+            baseByExtension.emplace(relation.extID, relation.baseID);
             const auto found = relations.find(key);
             if (found == relations.end() ||
                 (!found->second.hasPackID && relation.hasPackID))
@@ -1174,6 +1196,18 @@ namespace
                 continue;
             extensionIDs.insert(id);
             const RelationKey key{pack.hotMainID, id};
+            const auto owner = baseByExtension.find(id);
+            if (owner != baseByExtension.end() && owner->second != pack.hotMainID)
+            {
+                AddRBWarning(
+                    result, pack.sourcePath,
+                    "ignoring RBHot mainId " + std::to_string(pack.hotMainID) +
+                    " for extension " + std::to_string(id) +
+                    "; source nolist assigns it to " +
+                    std::to_string(owner->second));
+                continue;
+            }
+            baseByExtension.emplace(id, pack.hotMainID);
             if (!relations.contains(key))
             {
                 bmt::RBExtendRelation relation;
@@ -1306,6 +1340,26 @@ namespace bmt
         if (hotCount && !options.rbhotDefaultsPlist)
             throw std::invalid_argument("RBHot source requires rbhotDefaultsPlist");
 
+        std::vector<RBSource> orderedSources = sources;
+        const auto sourceRank = [](DLCType type)
+        {
+            switch (type)
+            {
+            case DLCType::Official:
+                return 0;
+            case DLCType::JBHot:
+                return 1;
+            case DLCType::Custom:
+                return 2;
+            }
+            return 3;
+        };
+        std::stable_sort(orderedSources.begin(), orderedSources.end(),
+                         [&](const RBSource& left, const RBSource& right)
+                         {
+                             return sourceRank(left.type) < sourceRank(right.type);
+                         });
+
         RBHotDefaultsData hotDefaults;
         auto hotMusic = std::make_shared<RBHotMap>();
         if (options.rbhotDefaultsPlist)
@@ -1315,9 +1369,9 @@ namespace bmt
         }
 
         RBLoadResult result;
-        for (size_t sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex)
+        for (size_t sourceIndex = 0; sourceIndex < orderedSources.size(); ++sourceIndex)
         {
-            const auto& source = sources[sourceIndex];
+            const auto& source = orderedSources[sourceIndex];
             RBLoadResult current;
             current.catalog = ParseRBCatalog(
                 LoadListBytes(source.directory, "mulist.plist", "mulist",
