@@ -1,9 +1,0 @@
-Package: com.naville.jubeatdisplayfix
-Name: Jubeat Display Fix
-Version: 1.0.0
-Architecture: iphoneos-arm
-Description: Fixes jubeat plus display scaling and touch coordinates on modern iOS devices.
-Maintainer: Naville
-Author: Naville
-Section: Tweaks
-Depends: mobilesubstrate
