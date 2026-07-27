@@ -4,11 +4,16 @@
 #include <UIKit/UIKit.h>
 #include <QuartzCore/QuartzCore.h>
 #define MULIST_KEY @"SHARED_KEY"
-#define MAXIMUM_FPS_KEY @"maxfps_enable"
+#define FPS_KEY @"KISS_FORCED_FPS"
 
 static NSString* getDocumentsPath(){
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     return [paths objectAtIndex:0];
+}
+
+static NSInteger selectedFPS(){
+    NSInteger fps = [[NSUserDefaults standardUserDefaults] integerForKey:FPS_KEY];
+    return fps == 60 || (fps == 120 && [UIScreen mainScreen].maximumFramesPerSecond >= 120) ? fps : 30;
 }
 
 %subclass BemaniSettingsViewController : UITableViewController
@@ -30,19 +35,41 @@ static NSString* getDocumentsPath(){
         cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [[[UITableViewCell alloc]
         initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil] autorelease];
-    UISwitch *toggle = [[[UISwitch alloc] initWithFrame:CGRectMake(0, 0, 0, 0)] autorelease];
-    cell.textLabel.text = @"Maximum FPS";
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    NSInteger selected = selectedFPS();
+    [button addTarget:self action:@selector(showFPSMenu:)
+       forControlEvents:UIControlEventTouchUpInside];
+    [button setTitle:[NSString stringWithFormat:@"%ld FPS  ▾", (long)selected]
+        forState:UIControlStateNormal];
+    [button sizeToFit];
+    cell.textLabel.text = @"Frame Rate";
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:MAXIMUM_FPS_KEY];
-    [toggle addTarget:self action:@selector(toggleMaximumFPS:)
-       forControlEvents:UIControlEventValueChanged];
-    cell.accessoryView = toggle;
+    cell.accessoryView = button;
     return cell;
 }
 %new
-- (void)toggleMaximumFPS:(UISwitch *)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:MAXIMUM_FPS_KEY];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+- (void)showFPSMenu:(UIButton *)sender {
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:nil message:nil
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    NSInteger selected = selectedFPS();
+    NSArray *rates = [UIScreen mainScreen].maximumFramesPerSecond >= 120
+        ? @[@30, @60, @120] : @[@30, @60];
+    for (NSNumber *rate in rates) {
+        NSString *title = [NSString stringWithFormat:@"%@%@ FPS",
+            selected == rate.integerValue ? @"✓ " : @"", rate];
+        [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction *action) {
+                [[NSUserDefaults standardUserDefaults] setInteger:rate.integerValue forKey:FPS_KEY];
+                [sender setTitle:[NSString stringWithFormat:@"%@ FPS  ▾", rate]
+                    forState:UIControlStateNormal];
+                [sender sizeToFit];
+            }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel"
+        style:UIAlertActionStyleCancel handler:nil]];
+    menu.popoverPresentationController.sourceView = sender;
+    menu.popoverPresentationController.sourceRect = sender.bounds;
+    [self presentViewController:menu animated:YES completion:nil];
 }
 %new
 - (void)closeSettings {
@@ -111,14 +138,11 @@ static NSString* getDocumentsPath(){
     CADisplayLink *old = [self valueForKey:@"displayLink"];
     [old invalidate];
     CADisplayLink *link = [CADisplayLink displayLinkWithTarget:self selector:@selector(loop:)];
-    BOOL enabled = [[NSUserDefaults standardUserDefaults] boolForKey:MAXIMUM_FPS_KEY];
-    NSInteger maximum = [UIScreen mainScreen].maximumFramesPerSecond;
+    NSInteger fps = selectedFPS();
     if (@available(iOS 15.0, *))
-        link.preferredFrameRateRange = enabled && maximum > 60
-            ? CAFrameRateRangeMake(maximum, maximum, maximum)
-            : CAFrameRateRangeMake(enabled ? 60 : 30, enabled ? 60 : 30, enabled ? 60 : 30);
+        link.preferredFrameRateRange = CAFrameRateRangeMake(fps, fps, fps);
     else
-        link.preferredFramesPerSecond = enabled ? maximum : 30;
+        link.preferredFramesPerSecond = fps;
     [link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
     [self setValue:link forKey:@"displayLink"];
 }
