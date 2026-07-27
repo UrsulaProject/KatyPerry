@@ -1,6 +1,7 @@
 #include <Bemani/BFContainer.h>
 #include <Bemani/JBT.h>
 #include <Bemani/Marker.h>
+#include <Bemani/RB.h>
 
 #include <boost/program_options.hpp>
 
@@ -79,6 +80,9 @@ namespace
             << "  mulist decrypt|encrypt\n"
             << "  jbt decrypt|encrypt|unpack|pack|unpack-dir|pack-dir\n"
             << "  jbhot defaults-dump\n"
+            << "  rb build|decrypt|encrypt|unpack|pack|unpack-dir|pack-dir\n"
+            << "  rbhot defaults-dump\n"
+            << "  nolist decrypt|encrypt\n"
             << "  marker decrypt|encrypt|unpack|pack|unpack-dir|pack-dir|build\n"
             << "  marker-list decrypt\n"
             << "\nUse BemaniTools <group> <command> --help for command options.\n";
@@ -267,6 +271,192 @@ namespace
         return result.diagnostics.empty() ? 0 : 2;
     }
 
+    int RunRBConversion(std::string_view command,
+                        const std::vector<std::string>& arguments)
+    {
+        fs::path input;
+        fs::path output;
+        fs::path defaults;
+        unsigned int decodeType = 0;
+        bool plain = false;
+        po::options_description options("rb " + std::string(command) + " options");
+        options.add_options()
+            ("help,h", "show help")
+            ("input,i", po::value<fs::path>(&input)->required(), "input RB or directory")
+            ("output,o", po::value<fs::path>(&output)->required(), "output RB or directory")
+            ("rbhot-plist", po::value<fs::path>(&defaults), "encrypted RBHot defaults plist")
+            ("decode-type", po::value<unsigned int>(&decodeType)->default_value(0),
+             "official BF DecodeType for encrypt/pack (0 or 1)")
+            ("plain", po::bool_switch(&plain), "write plaintext RB members");
+        const auto values = Parse(arguments, options);
+        if (values.count("help"))
+        {
+            std::cout << options << '\n';
+            return 0;
+        }
+        if (decodeType > 1)
+            throw std::runtime_error("--decode-type must be 0 or 1");
+        bmt::RBLoadOptions load;
+        if (!defaults.empty())
+            load.rbhotDefaultsPlist = defaults;
+        const auto outputType =
+            plain ? std::optional<uint8_t>{}
+                  : std::optional<uint8_t>{static_cast<uint8_t>(decodeType)};
+        if (command == "decrypt")
+            bmt::DecryptRB(input, output, load);
+        else if (command == "encrypt")
+        {
+            if (plain)
+                bmt::DecryptRB(input, output, load);
+            else
+                bmt::EncryptRB(input, output, static_cast<uint8_t>(decodeType), load);
+        }
+        else if (command == "unpack")
+            bmt::UnpackRB(input, output, load);
+        else if (command == "pack")
+            bmt::PackRB(input, output, outputType);
+        else if (command == "unpack-dir")
+            bmt::UnpackRBDirectory(input, output, load);
+        else if (command == "pack-dir")
+            bmt::PackRBDirectory(input, output, outputType);
+        else
+            throw std::runtime_error("unknown rb command " + std::string(command));
+        return 0;
+    }
+
+    int RunRBBuild(const std::vector<std::string>& arguments)
+    {
+        fs::path official;
+        fs::path rbhot;
+        fs::path defaults;
+        fs::path output;
+        std::vector<fs::path> custom;
+        bool eager = false;
+        bool strict = false;
+        bool encryptRB = true;
+        bool separate = false;
+        std::string mulistKey;
+        std::string outputKey = "preserve";
+        po::options_description options("rb build options");
+        options.add_options()
+            ("help,h", "show help")
+            ("official", po::value<fs::path>(&official), "Official RB DLC directory")
+            ("rbhot", po::value<fs::path>(&rbhot), "RBHot DLC directory")
+            ("rbhot-plist", po::value<fs::path>(&defaults), "encrypted RBHot defaults plist")
+            ("custom-dir", po::value<std::vector<fs::path>>(&custom)->composing(),
+             "Custom RB DLC directory; repeatable")
+            ("output,o", po::value<fs::path>(&output)->required(), "output directory")
+            ("eager", po::bool_switch(&eager), "materialize every resource while loading")
+            ("strict", po::bool_switch(&strict), "stop at the first invalid pack or relation")
+            ("encrypt-rb", po::value<bool>(&encryptRB)->default_value(true),
+             "encrypt output RB members")
+            ("output-key", po::value<std::string>(&outputKey)->default_value("preserve"),
+             "output DecodeType: preserve, 0, or 1")
+            ("separate-output", po::bool_switch(&separate),
+             "write RBs in official/rbhot/custom-N subdirectories")
+            ("mulist-key", po::value<std::string>(&mulistKey),
+             "raw ApplicationUniqueID before MD5; read/write runtime mulist and nolist");
+        const auto values = Parse(arguments, options);
+        if (values.count("help"))
+        {
+            std::cout << options << '\n';
+            return 0;
+        }
+        std::vector<bmt::RBSource> sources;
+        if (!official.empty())
+            sources.push_back({bmt::DLCType::Official, official});
+        if (!rbhot.empty())
+            sources.push_back({bmt::DLCType::JBHot, rbhot});
+        for (const auto& path : custom)
+            sources.push_back({bmt::DLCType::Custom, path});
+        if (sources.empty())
+            throw std::runtime_error("rb build requires --official, --rbhot, or --custom-dir");
+        if (!rbhot.empty() && defaults.empty())
+            throw std::runtime_error("--rbhot requires --rbhot-plist");
+
+        bmt::RBOutputKey parsedOutputKey;
+        if (outputKey == "preserve")
+            parsedOutputKey = bmt::RBOutputKey::Preserve;
+        else if (outputKey == "0")
+            parsedOutputKey = bmt::RBOutputKey::Type0;
+        else if (outputKey == "1")
+            parsedOutputKey = bmt::RBOutputKey::Type1;
+        else
+            throw std::runtime_error("--output-key must be preserve, 0, or 1");
+
+        bmt::RBLoadOptions load;
+        load.mode = eager ? bmt::LoadMode::Eager : bmt::LoadMode::Lazy;
+        load.failureMode = strict ? bmt::FailureMode::Strict : bmt::FailureMode::Continue;
+        if (!defaults.empty())
+            load.rbhotDefaultsPlist = defaults;
+        if (!mulistKey.empty())
+            load.mulistKey = mulistKey;
+        auto result = bmt::LoadRBPacks(sources, load);
+        bmt::RBExportOptions exportOptions;
+        exportOptions.encryptRB = encryptRB;
+        exportOptions.outputKey = parsedOutputKey;
+        exportOptions.separateByDLC = separate;
+        if (!mulistKey.empty())
+            exportOptions.mulistKey = mulistKey;
+        bmt::ExportRBPacks(result, output, exportOptions);
+        for (const auto& warning : result.warnings)
+            std::cerr << "warning: " << warning.path << ": " << warning.message << '\n';
+        for (const auto& diagnostic : result.diagnostics)
+            std::cerr << "error: " << diagnostic.path << ": " << diagnostic.message << '\n';
+        std::cout << "exported " << result.packs.size() << " RB music IDs; dropped "
+                  << result.droppedDuplicates << " duplicates; remapped "
+                  << result.remaps.size() << " packs\n";
+        return result.diagnostics.empty() ? 0 : 2;
+    }
+
+    int RunRBHot(std::string_view command, const std::vector<std::string>& arguments)
+    {
+        if (command != "defaults-dump")
+            throw std::runtime_error("unknown rbhot command " + std::string(command));
+        fs::path input;
+        fs::path output;
+        po::options_description options("rbhot defaults-dump options");
+        options.add_options()
+            ("help,h", "show help")
+            ("input,i", po::value<fs::path>(&input)->required(), "encrypted RBHot defaults plist")
+            ("output-dir,o", po::value<fs::path>(&output)->required(), "JSON output directory");
+        const auto values = Parse(arguments, options);
+        if (values.count("help"))
+        {
+            std::cout << options << '\n';
+            return 0;
+        }
+        for (const auto& [name, json] : bmt::DumpRBHotDefaults(input))
+            WriteText(output / (name + ".json"), json + "\n");
+        return 0;
+    }
+
+    int RunNolist(std::string_view command, const std::vector<std::string>& arguments)
+    {
+        fs::path input;
+        fs::path output;
+        std::string key;
+        po::options_description options("nolist " + std::string(command) + " options");
+        options.add_options()
+            ("help,h", "show help")
+            ("input,i", po::value<fs::path>(&input)->required(), "input nolist file")
+            ("output,o", po::value<fs::path>(&output)->required(), "output nolist file")
+            ("key,k", po::value<std::string>(&key)->required(), "raw key before MD5 derivation");
+        const auto values = Parse(arguments, options);
+        if (values.count("help"))
+        {
+            std::cout << options << '\n';
+            return 0;
+        }
+        if (command == "decrypt")
+            WriteFile(output, bmt::DecryptRBList(input, key));
+        else if (command == "encrypt")
+            WriteFile(output, bmt::EncryptRBList(input, key));
+        else
+            throw std::runtime_error("unknown nolist command " + std::string(command));
+        return 0;
+    }
+
     int RunMarkerConversion(std::string_view command,
                             const std::vector<std::string>& arguments)
     {
@@ -392,6 +582,13 @@ int main(int argc, char** argv)
             return RunJBT(command, arguments);
         if (group == "jbhot")
             return RunJBHot(command, arguments);
+        if (group == "rb")
+            return command == "build" ? RunRBBuild(arguments)
+                                      : RunRBConversion(command, arguments);
+        if (group == "rbhot")
+            return RunRBHot(command, arguments);
+        if (group == "nolist")
+            return RunNolist(command, arguments);
         if (group == "marker")
             return command == "build" ? RunMarkerBuild(arguments)
                                       : RunMarkerConversion(command, arguments);

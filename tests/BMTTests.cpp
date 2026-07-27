@@ -8,6 +8,7 @@
 #include <Bemani/RB.h>
 
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <zip.h>
 
 #include <algorithm>
@@ -21,6 +22,9 @@
 #include <iostream>
 #include <initializer_list>
 #include <iterator>
+#include <map>
+#include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -103,6 +107,132 @@ namespace
         if (read != static_cast<zip_int64_t>(bytes.size()))
             throw std::runtime_error("cannot read test ZIP member");
         return bytes;
+    }
+
+    std::string Base64Encode(std::span<const uint8_t> bytes)
+    {
+        if (bytes.empty())
+            return {};
+        std::string output(((bytes.size() + 2) / 3) * 4, '\0');
+        const int size = EVP_EncodeBlock(
+            reinterpret_cast<unsigned char*>(output.data()), bytes.data(),
+            static_cast<int>(bytes.size()));
+        if (size < 0)
+            throw std::runtime_error("cannot encode test Base64");
+        output.resize(static_cast<size_t>(size));
+        return output;
+    }
+
+    std::vector<uint8_t> EncryptAES(std::span<const uint8_t> plaintext,
+                                    std::span<const uint8_t> key,
+                                    std::span<const uint8_t> iv,
+                                    const EVP_CIPHER* cipher)
+    {
+        EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
+        if (!context ||
+            EVP_EncryptInit_ex(context, cipher, nullptr, key.data(), iv.data()) != 1)
+        {
+            EVP_CIPHER_CTX_free(context);
+            throw std::runtime_error("cannot initialize test AES");
+        }
+        std::vector<uint8_t> output(
+            plaintext.size() + static_cast<size_t>(EVP_CIPHER_block_size(cipher)));
+        int first = 0;
+        int final = 0;
+        const bool success =
+            EVP_EncryptUpdate(context, output.data(), &first, plaintext.data(),
+                              static_cast<int>(plaintext.size())) == 1 &&
+            EVP_EncryptFinal_ex(context, output.data() + first, &final) == 1;
+        EVP_CIPHER_CTX_free(context);
+        if (!success)
+            throw std::runtime_error("cannot encrypt test AES");
+        output.resize(static_cast<size_t>(first + final));
+        return output;
+    }
+
+    std::vector<uint8_t> EncryptRNCryptor(std::span<const uint8_t> plaintext,
+                                          std::string_view password,
+                                          uint8_t seed)
+    {
+        std::array<uint8_t, 8> encryptionSalt{};
+        std::array<uint8_t, 8> hmacSalt{};
+        std::array<uint8_t, 16> iv{};
+        for (size_t index = 0; index < encryptionSalt.size(); ++index)
+        {
+            encryptionSalt[index] = static_cast<uint8_t>(seed + index);
+            hmacSalt[index] = static_cast<uint8_t>(seed + 16 + index);
+        }
+        for (size_t index = 0; index < iv.size(); ++index)
+            iv[index] = static_cast<uint8_t>(seed + 32 + index);
+        std::array<uint8_t, 32> encryptionKey{};
+        std::array<uint8_t, 32> hmacKey{};
+        if (PKCS5_PBKDF2_HMAC_SHA1(
+                password.data(), static_cast<int>(password.size()),
+                encryptionSalt.data(), static_cast<int>(encryptionSalt.size()),
+                10000, static_cast<int>(encryptionKey.size()),
+                encryptionKey.data()) != 1 ||
+            PKCS5_PBKDF2_HMAC_SHA1(
+                password.data(), static_cast<int>(password.size()),
+                hmacSalt.data(), static_cast<int>(hmacSalt.size()), 10000,
+                static_cast<int>(hmacKey.size()), hmacKey.data()) != 1)
+            throw std::runtime_error("cannot derive test RNCryptor keys");
+        const auto ciphertext =
+            EncryptAES(plaintext, encryptionKey, iv, EVP_aes_256_cbc());
+        std::vector<uint8_t> blob = {3, 1};
+        blob.insert(blob.end(), encryptionSalt.begin(), encryptionSalt.end());
+        blob.insert(blob.end(), hmacSalt.begin(), hmacSalt.end());
+        blob.insert(blob.end(), iv.begin(), iv.end());
+        blob.insert(blob.end(), ciphertext.begin(), ciphertext.end());
+        std::array<uint8_t, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digestLength = 0;
+        if (!HMAC(EVP_sha256(), hmacKey.data(), static_cast<int>(hmacKey.size()),
+                  blob.data(), blob.size(), digest.data(), &digestLength) ||
+            digestLength != 32)
+            throw std::runtime_error("cannot calculate test RNCryptor HMAC");
+        blob.insert(blob.end(), digest.begin(), digest.begin() + digestLength);
+        return blob;
+    }
+
+    void WriteTestZip(
+        const std::filesystem::path& path,
+        const std::map<std::string, std::vector<uint8_t>>& members)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        int error = 0;
+        const auto archivePath = UTF8Path(path);
+        zip_t* archive = zip_open(archivePath.c_str(), ZIP_CREATE | ZIP_TRUNCATE, &error);
+        if (!archive)
+            throw std::runtime_error("cannot create test ZIP");
+        for (const auto& [name, data] : members)
+        {
+            zip_source_t* source =
+                zip_source_buffer(archive, data.data(), data.size(), 0);
+            if (!source ||
+                zip_file_add(archive, name.c_str(), source,
+                             ZIP_FL_OVERWRITE | ZIP_FL_ENC_UTF_8) < 0)
+            {
+                if (source)
+                    zip_source_free(source);
+                zip_discard(archive);
+                throw std::runtime_error("cannot add test ZIP member");
+            }
+        }
+        if (zip_close(archive) != 0)
+        {
+            zip_discard(archive);
+            throw std::runtime_error("cannot close test ZIP");
+        }
+        const auto bytes = ReadBytes(path);
+        std::array<uint8_t, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digestLength = 0;
+        if (EVP_Digest(bytes.data(), bytes.size(), digest.data(), &digestLength,
+                       EVP_md5(), nullptr) != 1 ||
+            digestLength != 16)
+            throw std::runtime_error("cannot calculate test ZIP MD5");
+        std::ofstream output(path, std::ios::binary | std::ios::app);
+        output.write(reinterpret_cast<const char*>(digest.data()), digestLength);
+        if (!output)
+            throw std::runtime_error("cannot append test ZIP MD5");
     }
 
     void SetContent(bmt::MusicPack& pack, std::initializer_list<uint8_t> bytes)
@@ -727,6 +857,26 @@ int RunTests()
     assert(ReadZipEntry(rbPlain, "unknown/member") ==
            ReadBytes(rbExpanded / "unknown/member"));
 
+    const auto paddedRBDirectory = rbRoot / "padded-id";
+    std::filesystem::create_directories(paddedRBDirectory);
+    std::filesystem::copy_file(rbPlain,
+                               paddedRBDirectory / "0123456789.rb");
+    bool rejectedPaddedRBID = false;
+    try
+    {
+        (void)bmt::LoadRBPacks(
+            {{bmt::DLCType::Official, paddedRBDirectory}},
+            {.mode = bmt::LoadMode::Eager,
+             .failureMode = bmt::FailureMode::Strict});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedPaddedRBID =
+            std::string_view(error.what()).find("leading zeros") !=
+            std::string_view::npos;
+    }
+    assert(rejectedPaddedRBID);
+
     for (uint8_t decodeType = 0; decodeType < 2; ++decodeType)
     {
         const auto encryptedRB =
@@ -769,6 +919,126 @@ int RunTests()
     WriteBytes(rbListEncrypted, bmt::EncryptRBList(rbListPlain, "RB-LIST-KEY"));
     assert(bmt::DecryptRBList(rbListEncrypted, "RB-LIST-KEY") ==
            ReadBytes(rbListPlain));
+
+    const std::array<uint8_t, 16> rbType0MD5 = {
+        0x8f, 0x26, 0xf6, 0x77, 0x51, 0xad, 0x54, 0x94,
+        0x15, 0x3a, 0x6c, 0x98, 0xfa, 0x85, 0xfe, 0x1f,
+    };
+    const std::array<uint8_t, 16> rbType1MD5 = {
+        0x40, 0x4b, 0xd8, 0x02, 0x6b, 0xec, 0x64, 0x66,
+        0xe5, 0x32, 0xdb, 0xf0, 0x2d, 0x0d, 0xe5, 0xe4,
+    };
+    assert(bmt::MD5Key("Konami ReflecBeat For iOS.") == rbType0MD5);
+    assert(bmt::MD5Key("Konami ReflecBeatplus.") == rbType1MD5);
+
+    static constexpr std::array<std::string_view, 42> rbHotFields = {
+        "info",
+        "noteBasic", "noteMedium", "noteHard",
+        "bgmBasic", "bgmMedium", "bgmHard",
+        "preBasic", "preMedium", "preHard",
+        "artworkBasic1x", "artworkMedium1x", "artworkHard1x", "artworkPack1x",
+        "artworkBasic2x", "artworkMedium2x", "artworkHard2x", "artworkPack2x",
+        "titleBlackBasic1x", "titleBlackMedium1x", "titleBlackHard1x",
+        "titleWhiteBasic1x", "titleWhiteMedium1x", "titleWhiteHard1x",
+        "titleBlackBasic2x", "titleBlackMedium2x", "titleBlackHard2x",
+        "titleWhiteBasic2x", "titleWhiteMedium2x", "titleWhiteHard2x",
+        "artistBlackBasic1x", "artistBlackMedium1x", "artistBlackHard1x",
+        "artistWhiteBasic1x", "artistWhiteMedium1x", "artistWhiteHard1x",
+        "artistBlackBasic2x", "artistBlackMedium2x", "artistBlackHard2x",
+        "artistWhiteBasic2x", "artistWhiteMedium2x", "artistWhiteHard2x",
+    };
+    constexpr uint32_t rbHotID = 806202001;
+    constexpr std::string_view rbHotPassword = "RBHotPass!";
+    const uint32_t rbHotLow = rbHotID % 23456;
+    const uint32_t rbHotHigh = rbHotID / 23456;
+    assert(rbHotHigh <= std::numeric_limits<uint16_t>::max());
+    std::map<std::string, std::vector<uint8_t>> rbHotMembers;
+    std::map<std::string, std::vector<uint8_t>> rbHotPlaintext;
+    std::string rbHotInfo = rbInfo;
+    const auto rbHotInfoIDPosition = rbHotInfo.find("123456789");
+    assert(rbHotInfoIDPosition != std::string::npos);
+    rbHotInfo.replace(rbHotInfoIDPosition, 9, std::to_string(rbHotID));
+    std::ostringstream rbHotMusicJSON;
+    rbHotMusicJSON << "{\"data\":{\"" << rbHotID << "\":{\"id\":" << rbHotID
+                   << ",\"mainId\":806202000,\"password\":\"" << rbHotPassword
+                   << "\"";
+    for (uint8_t type = 0; type < rbHotFields.size(); ++type)
+    {
+        const std::string name =
+            type == 0 ? "info" : "type_" + std::to_string(type);
+        std::vector<uint8_t> plaintext;
+        if (type == 0)
+            plaintext.assign(rbHotInfo.begin(), rbHotInfo.end());
+        else
+            plaintext = {'T', 'Y', 'P', 'E', type, 0, 1, 2, 3};
+        const auto encoded =
+            Base64Encode(EncryptRNCryptor(plaintext, rbHotPassword, type));
+        const size_t prefixSize = std::min<size_t>(17, encoded.size());
+        rbHotMusicJSON << ",\"" << rbHotFields[type] << "\":\""
+                       << encoded.substr(0, prefixSize) << "\"";
+        std::vector<uint8_t> resource(
+            {'=', 'R', 'B', 'H', 'O', 'T', '=',
+             static_cast<uint8_t>(rbHotLow),
+             static_cast<uint8_t>(rbHotLow >> 8), type,
+             static_cast<uint8_t>(rbHotHigh),
+             static_cast<uint8_t>(rbHotHigh >> 8)});
+        resource.insert(resource.end(), encoded.begin() +
+                                          static_cast<std::ptrdiff_t>(prefixSize),
+                        encoded.end());
+        rbHotMembers[name] = std::move(resource);
+        rbHotPlaintext[name] = std::move(plaintext);
+    }
+    rbHotMusicJSON << "}}}";
+    const std::string rbHotMusic = rbHotMusicJSON.str();
+    const std::array<uint8_t, 16> rbHotDefaultsKey = {
+        'b', '3', '8', 'f', 'h', '4', '9', '5',
+        'h', '9', 'f', 'j', 'h', 'w', '3', '4',
+    };
+    const std::array<uint8_t, 16> zeroIV{};
+    const auto rbHotMusicCipher = EncryptAES(
+        std::span(reinterpret_cast<const uint8_t*>(rbHotMusic.data()),
+                  rbHotMusic.size()),
+        rbHotDefaultsKey, zeroIV, EVP_aes_128_cbc());
+    const std::string rbHotDefaultsXML =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><dict><key>musicData</key><string>" +
+        Base64Encode(rbHotMusicCipher) + "</string></dict></plist>";
+    const auto rbHotFixture = rbRoot / "rbhot-fixture" / "806202001.rb";
+    const auto rbHotDefaults = rbRoot / "rbhot-fixture" / "defaults.plist";
+    WriteTestZip(rbHotFixture, rbHotMembers);
+    WriteText(rbHotDefaults, rbHotDefaultsXML);
+    const auto rbHotUnpacked = rbRoot / "rbhot-fixture" / "unpacked";
+    bmt::UnpackRB(rbHotFixture, rbHotUnpacked,
+                  {.rbhotDefaultsPlist = rbHotDefaults});
+    for (const auto& [name, plaintext] : rbHotPlaintext)
+        assert(ReadBytes(rbHotUnpacked / name) == plaintext);
+
+    std::string wrongPasswordJSON = rbHotMusic;
+    const auto passwordPosition = wrongPasswordJSON.find(rbHotPassword);
+    assert(passwordPosition != std::string::npos);
+    wrongPasswordJSON.replace(passwordPosition, rbHotPassword.size(), "WrongPass!");
+    const auto wrongCipher = EncryptAES(
+        std::span(reinterpret_cast<const uint8_t*>(wrongPasswordJSON.data()),
+                  wrongPasswordJSON.size()),
+        rbHotDefaultsKey, zeroIV, EVP_aes_128_cbc());
+    const std::string wrongDefaultsXML =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><dict><key>musicData</key><string>" +
+        Base64Encode(wrongCipher) + "</string></dict></plist>";
+    const auto wrongDefaults = rbRoot / "rbhot-fixture" / "wrong-defaults.plist";
+    WriteText(wrongDefaults, wrongDefaultsXML);
+    bool rejectedWrongRBHotPassword = false;
+    try
+    {
+        bmt::UnpackRB(rbHotFixture, rbRoot / "rbhot-fixture" / "wrong",
+                      {.rbhotDefaultsPlist = wrongDefaults});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedWrongRBHotPassword =
+            std::string_view(error.what()).find("HMAC") != std::string_view::npos;
+    }
+    assert(rejectedWrongRBHotPassword);
 
     const auto rbBuild = rbRoot / "build";
     const auto rbOfficial = rbBuild / "official";

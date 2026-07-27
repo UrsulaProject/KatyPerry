@@ -1,7 +1,8 @@
 # BemaniTools 使用说明
 
-BemaniTools 用来读取、转换和合并 jubeat 的 JBT 曲包、mulist、playlists 和
-Marker。核心库会自动识别明文、官方 BFCodec 和 JBHot 格式；CLI 只负责参数解析。
+BemaniTools 用来读取、转换和合并 jubeat 的 JBT 曲包、REFLEC BEAT 的 RB 曲包、
+mulist、playlists 和 Marker。核心库会自动识别明文、官方 BFCodec、JBHot 和
+RBHot 格式；CLI 只负责参数解析。
 
 ## 编译
 
@@ -64,7 +65,8 @@ CTest，并上传以下 artifact：
 
 ## 通用格式规则
 
-- JBT、Marker 和 mulist 高层命令会透明处理对应格式中的四字节随机前缀。
+- JBT、RB、Marker、mulist 和 nolist 高层命令会透明处理各自格式中的随机前缀。
+  `.rb` ZIP 成员本身没有四字节前缀；REFLEC BEAT 的运行时 mulist/nolist 有。
   通用 `bfcodec` 命令只处理 BFContainer 本身，不添加或删除 payload 字节。
 - `mulist --key` 和 `dlc build --mulist-key` 接收 MD5 之前的原始字符串，
   例如 `SHARED_KEY`。
@@ -83,6 +85,11 @@ CTest，并上传以下 artifact：
 JBT 映射的 key 是源 `.jbt` 文件名中的数字 ID，value 是最终 ID。映射同时作用于
 JBT 内部 `info.ID`、base/ext 关系、mulist 和 playlists。Marker 的映射则同时修改
 `mkXXXX.zip`、banner 名称和生成的 marker list。
+
+RB 映射的 key 同样是源 `.rb` 文件名中的无前导零数字 ID，value 必须是
+`100000000`–`2147483647`。映射会同步修改 `.rb` 的 `info.ID`、mulist、nolist 的
+`ID/ExtID`、RBHot `mainId` 和 playlist `LIST`；nolist 的商店产品 `PackID`
+不会被修改。
 
 ## 命令说明
 
@@ -274,6 +281,153 @@ JSON。
 ./build/BemaniTools jbhot defaults-dump \
   --input /path/to/jbhot-defaults.plist \
   --output-dir /path/to/json-output
+```
+
+## REFLEC BEAT `.rb`
+
+### `rb decrypt|encrypt`
+
+`rb decrypt` 自动识别明文、官方 BF DecodeType 0/1 和 `=RBHOT=` 成员，输出成员为
+明文的 `.rb` ZIP。RBHot 输入必须提供对应 defaults plist：
+
+```sh
+./build/BemaniTools rb decrypt \
+  --input /path/to/100000109.rb \
+  --output /path/to/100000109-plain.rb
+
+./build/BemaniTools rb decrypt \
+  --input /path/to/hot/806202001.rb \
+  --output /path/to/806202001-plain.rb \
+  --rbhot-plist /path/to/rbhot-defaults.plist
+```
+
+`rb encrypt` 只生成官方 BF 格式，不生成 RBHot。`--decode-type` 可为 `0` 或 `1`，
+默认 0；`--plain` 则输出明文成员：
+
+```sh
+./build/BemaniTools rb encrypt \
+  --input /path/to/100000109-plain.rb \
+  --output /path/to/100000109.rb \
+  --decode-type 1
+```
+
+### `rb unpack|pack`
+
+`rb unpack` 解密并展开单个 `.rb`。目录中会得到真正的 `info` plist、PNG、
+`RBFF` note 和 M4A/MP4 资源，未知成员和子目录也会保留。
+
+```sh
+./build/BemaniTools rb unpack \
+  --input /path/to/100000109.rb \
+  --output /path/to/work/100000109
+```
+
+`rb pack` 将展开目录重新打包；默认用 DecodeType 0 官方加密，`--decode-type 1`
+改用 Type 1，`--plain` 生成明文成员：
+
+```sh
+./build/BemaniTools rb pack \
+  --input /path/to/work/100000109 \
+  --output /path/to/100000109.rb \
+  --decode-type 0
+```
+
+`rb unpack-dir` 递归查找 `.rb` 并保留相对目录展开；`rb pack-dir` 递归查找含
+`info` 的展开目录并生成 `.rb`。参数与单包命令相同：
+
+```sh
+./build/BemaniTools rb unpack-dir \
+  --input /path/to/rb-root \
+  --output /path/to/expanded-root \
+  --rbhot-plist /path/to/rbhot-defaults.plist
+
+./build/BemaniTools rb pack-dir \
+  --input /path/to/expanded-root \
+  --output /path/to/rb-root \
+  --decode-type 0
+```
+
+### `rb build`
+
+统一加载并合并 REFLEC BEAT DLC：
+
+```sh
+./build/BemaniTools rb build \
+  --official /path/to/official-rb \
+  --rbhot /path/to/rbhot-rb \
+  --rbhot-plist /path/to/rbhot-defaults.plist \
+  --custom-dir /path/to/custom-rb-one \
+  --custom-dir /path/to/custom-rb-two \
+  --output /path/to/RB-OUT \
+  --mulist-key APPLICATION_UNIQUE_ID
+```
+
+每个源目录只扫描根目录 `*.rb`，并自动读取：
+
+- `mulist.plist`，或使用 `--mulist-key` 解密运行时 `mulist`；
+- `nolist.plist`，或使用同一 key 解密运行时 `nolist`；
+- 明文 `playlist.plist` 或运行时 `playlist`；
+- 发生 ID 冲突时的 `mapping.json`。
+
+输入优先级固定为 Official → RBHot → Custom 参数顺序。去重 hash 包含全部解密后
+的非 `info` 成员名、长度和内容；同最终 ID 且内容一致时静默丢弃后加载实例，
+内容不同时要求新 DLC 提供 mapping。
+
+其他选项：
+
+- `--encrypt-rb=true|false`：默认 `true`。
+- `--output-key=preserve|0|1`：默认 `preserve`。官方输入保留原 DecodeType；
+  明文和 RBHot 输入默认转成 Type 0。
+- `--separate-output`：曲包写入 `official/`、`rbhot/`、`custom-N/` 子目录，
+  列表仍在输出根目录。
+- `--eager`：加载时立即解密所有资源。
+- `--strict`：包错误或缺失 base/ext 时立即失败。
+
+默认输出：
+
+```text
+RB-OUT/
+├── 100000109.rb
+├── 806202000.rb
+├── 806202001.rb
+├── mulist.plist
+├── nolist.plist
+├── playlist.plist       # 有 playlist 时
+├── mulist               # 指定 --mulist-key 时
+├── nolist               # 指定 --mulist-key 时
+└── playlist             # 指定 key 且有 playlist 时，原版明文运行时格式
+```
+
+mulist 只包含普通/base 曲目。官方/custom 的 SPECIAL 关系来自 nolist；RBHot
+`mainId` 只用于识别 base/ext 和冲突组件。没有来源 nolist `PackID` 时，工具会
+保留 ext `.rb`、从 mulist 排除它、警告并省略该 nolist 项，不会猜测 PackID。
+
+### `rbhot defaults-dump`
+
+解密 RBHot defaults 中存在的 `musicData`、`serverData`、`userData`、
+`offlineData`、`scoreData`，并按字段合并 `musicDetail`/`musicDetail1...N`：
+
+```sh
+./build/BemaniTools rbhot defaults-dump \
+  --input /path/to/rbhot-defaults.plist \
+  --output-dir /path/to/rbhot-json
+```
+
+### `nolist decrypt|encrypt`
+
+REFLEC BEAT 的 mulist 和 nolist 使用同一 ApplicationUniqueID。nolist 命令会透明
+删除或添加四字节随机前缀，`--key` 接受 MD5 之前的原始字符串：
+
+```sh
+./build/BemaniTools nolist decrypt \
+  --input /path/to/nolist \
+  --output /path/to/nolist.plist \
+  --key APPLICATION_UNIQUE_ID
+
+./build/BemaniTools nolist encrypt \
+  --input /path/to/nolist.plist \
+  --output /path/to/nolist \
+  --key APPLICATION_UNIQUE_ID
 ```
 
 ### `marker decrypt`

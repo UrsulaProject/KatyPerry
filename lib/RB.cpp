@@ -488,7 +488,11 @@ namespace
     {
         if (!fs::is_regular_file(path))
             throw std::invalid_argument("RB input is not a regular file: " + path.string());
-        const uint32_t fileID = ParseUInt(path.stem().string(), "RB filename ID");
+        const std::string filenameID = path.stem().string();
+        if (filenameID.size() > 1 && filenameID.front() == '0')
+            throw std::runtime_error("RB filename ID must not contain leading zeros: " +
+                                     filenameID);
+        const uint32_t fileID = ParseUInt(filenameID, "RB filename ID");
         const auto names = ListZipEntries(path);
         if (std::find(names.begin(), names.end(), "info") == names.end())
             throw std::runtime_error("RB package has no info member");
