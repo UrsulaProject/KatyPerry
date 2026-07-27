@@ -785,6 +785,28 @@ namespace
                                 std::make_move_iterator(sourceResult.playlists.end()));
     }
 
+    void ApplyCrossDLCPlaylistMappings(bmt::LoadResult& result)
+    {
+        std::map<uint32_t, std::set<uint32_t>> targetsByOldID;
+        for (const auto& remap : result.remaps)
+            targetsByOldID[remap.oldID].insert(remap.newID);
+
+        for (auto& playlist : result.playlists)
+        {
+            for (auto& id : playlist.musicIDs)
+            {
+                if (result.packs.contains(id))
+                    continue;
+                const auto targets = targetsByOldID.find(id);
+                if (targets == targetsByOldID.end() || targets->second.size() != 1)
+                    continue;
+                const uint32_t mappedID = *targets->second.begin();
+                if (result.packs.contains(mappedID))
+                    id = mappedID;
+            }
+        }
+    }
+
     std::string PackFileName(uint32_t id)
     {
         std::ostringstream stream;
@@ -1333,6 +1355,7 @@ namespace bmt
             ApplyIDMapping(sourceResult, mapping, source.directory);
             MergeDLC(result, sourceResult, source.directory);
         }
+        ApplyCrossDLCPlaylistMappings(result);
         ValidateRuntimeIDs(result.packs);
         return result;
     }

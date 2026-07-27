@@ -546,6 +546,35 @@ int RunTests()
     assert(mappedLoaded.playlists.size() == 1);
     assert(mappedLoaded.playlists.front().musicIDs == (std::vector<uint32_t>{223456789}));
 
+    const auto crossPlaylistOfficial = output / "cross-playlist-official";
+    std::filesystem::create_directory(crossPlaylistOfficial);
+    std::filesystem::copy_file(output / "123456792.jbt",
+                               crossPlaylistOfficial / "123456792.jbt");
+    bmt::ExportPlaylists(
+        {{"22222222222222222222222222222222", "Cross-DLC mapping", {123456789}}},
+        crossPlaylistOfficial / "playlists.plist");
+    auto crossPlaylistLoaded = bmt::LoadPacks({
+        {bmt::DLCType::Official, crossPlaylistOfficial},
+        {bmt::DLCType::Custom, conflictingDirectory},
+    }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(crossPlaylistLoaded.playlists.size() == 2);
+    assert(crossPlaylistLoaded.playlists.front().musicIDs ==
+           (std::vector<uint32_t>{223456789}));
+
+    const auto occupiedPlaylistOfficial = output / "occupied-playlist-official";
+    std::filesystem::create_directory(occupiedPlaylistOfficial);
+    std::filesystem::copy_file(output / "123456789.jbt",
+                               occupiedPlaylistOfficial / "123456789.jbt");
+    bmt::ExportPlaylists(
+        {{"33333333333333333333333333333333", "Occupied original ID", {123456789}}},
+        occupiedPlaylistOfficial / "playlists.plist");
+    auto occupiedPlaylistLoaded = bmt::LoadPacks({
+        {bmt::DLCType::Official, occupiedPlaylistOfficial},
+        {bmt::DLCType::Custom, conflictingDirectory},
+    }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
+    assert(occupiedPlaylistLoaded.playlists.front().musicIDs ==
+           (std::vector<uint32_t>{123456789}));
+
     WriteText(conflictingDirectory / "mapping.json", "{\n  \"123456789\": 23456789\n}\n");
     bool rejectedLowMappingTarget = false;
     try
