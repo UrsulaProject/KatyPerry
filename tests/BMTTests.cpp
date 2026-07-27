@@ -5,6 +5,7 @@
 #include <Bemani/BFContainer.h>
 #include <Bemani/JBT.h>
 #include <Bemani/Marker.h>
+#include <Bemani/RB.h>
 
 #include <openssl/evp.h>
 #include <zip.h>
@@ -697,6 +698,164 @@ int RunTests()
     assert(remappedMarkers.remaps.size() == 1);
     assert(remappedMarkers.remaps.front().oldID == 48);
     assert(remappedMarkers.remaps.front().newID == 49);
+
+    const auto rbRoot = output / "rb";
+    const auto rbExpanded = rbRoot / "expanded";
+    const std::string rbInfo =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><dict>"
+        "<key>ID</key><integer>123456789</integer>"
+        "<key>MusicName</key><string>RB Test</string>"
+        "<key>MusicNameHira</key><string>てすと</string>"
+        "<key>MusicNameRoman</key><string>Test</string>"
+        "<key>ArtistName</key><string>Test Artist</string>"
+        "<key>Basic</key><integer>3</integer>"
+        "<key>Medium</key><integer>6</integer>"
+        "<key>Hard</key><integer>9</integer>"
+        "<key>BpmMin</key><integer>120</integer>"
+        "<key>BpmMax</key><integer>180</integer>"
+        "<key>Options</key><dict><key>Unknown</key><true/></dict>"
+        "</dict></plist>";
+    WriteText(rbExpanded / "info", rbInfo);
+    WriteBytes(rbExpanded / "note_bas", {'R', 'B', 'F', 'F', 1, 2, 3, 4});
+    WriteBytes(rbExpanded / "unknown/member", {9, 8, 7, 6});
+
+    const auto rbPlain = rbRoot / "123456789.rb";
+    bmt::PackRB(rbExpanded, rbPlain, std::nullopt);
+    assert(HasTrailingMD5(rbPlain));
+    assert(ReadZipEntry(rbPlain, "info") == ReadBytes(rbExpanded / "info"));
+    assert(ReadZipEntry(rbPlain, "unknown/member") ==
+           ReadBytes(rbExpanded / "unknown/member"));
+
+    for (uint8_t decodeType = 0; decodeType < 2; ++decodeType)
+    {
+        const auto encryptedRB =
+            rbRoot / (std::string("type-") + std::to_string(decodeType)) / "123456789.rb";
+        bmt::PackRB(rbExpanded, encryptedRB, decodeType);
+        assert(HasTrailingMD5(encryptedRB));
+        assert(bmt::IsBFContainer(ReadZipEntry(encryptedRB, "info")));
+        const auto unpacked =
+            rbRoot / (std::string("unpacked-") + std::to_string(decodeType));
+        bmt::UnpackRB(encryptedRB, unpacked);
+        assert(ReadBytes(unpacked / "info") == ReadBytes(rbExpanded / "info"));
+        assert(ReadBytes(unpacked / "note_bas") == ReadBytes(rbExpanded / "note_bas"));
+        assert(ReadBytes(unpacked / "unknown/member") ==
+               ReadBytes(rbExpanded / "unknown/member"));
+
+        const auto decryptedRB =
+            rbRoot / (std::string("decrypted-") + std::to_string(decodeType)) /
+            "123456789.rb";
+        bmt::DecryptRB(encryptedRB, decryptedRB);
+        assert(!bmt::IsBFContainer(ReadZipEntry(decryptedRB, "info")));
+        const auto reencryptedRB =
+            rbRoot / (std::string("reencrypted-") + std::to_string(decodeType)) /
+            "123456789.rb";
+        bmt::EncryptRB(decryptedRB, reencryptedRB, decodeType);
+        const auto roundTrip =
+            rbRoot / (std::string("roundtrip-") + std::to_string(decodeType));
+        bmt::UnpackRB(reencryptedRB, roundTrip);
+        assert(ReadBytes(roundTrip / "info") == ReadBytes(rbExpanded / "info"));
+        assert(ReadBytes(roundTrip / "unknown/member") ==
+               ReadBytes(rbExpanded / "unknown/member"));
+    }
+
+    const auto rbListPlain = rbRoot / "nolist.plist";
+    WriteText(rbListPlain,
+              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+              "<plist version=\"1.0\"><array><dict>"
+              "<key>ID</key><integer>123456789</integer>"
+              "</dict></array></plist>");
+    const auto rbListEncrypted = rbRoot / "nolist";
+    WriteBytes(rbListEncrypted, bmt::EncryptRBList(rbListPlain, "RB-LIST-KEY"));
+    assert(bmt::DecryptRBList(rbListEncrypted, "RB-LIST-KEY") ==
+           ReadBytes(rbListPlain));
+
+    const auto rbBuild = rbRoot / "build";
+    const auto rbOfficial = rbBuild / "official";
+    const auto rbDuplicate = rbBuild / "custom-duplicate";
+    std::filesystem::create_directories(rbOfficial);
+    std::filesystem::create_directories(rbDuplicate);
+    std::filesystem::copy_file(
+        rbRoot / "type-0" / "123456789.rb",
+        rbOfficial / "123456789.rb");
+    std::filesystem::copy_file(
+        rbRoot / "type-0" / "123456789.rb",
+        rbDuplicate / "123456789.rb");
+
+    const auto rbExtExpanded = rbBuild / "ext-expanded";
+    std::string rbExtInfo = rbInfo;
+    const auto rbExtIDPosition = rbExtInfo.find("123456789");
+    assert(rbExtIDPosition != std::string::npos);
+    rbExtInfo.replace(rbExtIDPosition, 9, "123456790");
+    WriteText(rbExtExpanded / "info", rbExtInfo);
+    WriteBytes(rbExtExpanded / "note_bas", {'R', 'B', 'F', 'F', 9, 9, 9});
+    bmt::PackRB(rbExtExpanded, rbOfficial / "123456790.rb", uint8_t{1});
+
+    WriteText(
+        rbOfficial / "mulist.plist",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array><dict>"
+        "<key>ID</key><integer>123456789</integer>"
+        "<key>Name</key><string>Catalog Name</string>"
+        "<key>Artist</key><string>Catalog Artist</string>"
+        "<key>ItemURL</key><string>https://example.invalid/base</string>"
+        "</dict></array></plist>");
+    WriteText(
+        rbOfficial / "nolist.plist",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<plist version=\"1.0\"><array><dict>"
+        "<key>ExtID</key><integer>123456790</integer>"
+        "<key>PackID</key><integer>42</integer>"
+        "<key>ID</key><integer>123456789</integer>"
+        "<key>ExtLevel</key><integer>3</integer>"
+        "<key>Comment</key><string>SPECIAL</string>"
+        "</dict></array></plist>");
+    bmt::ExportPlaylists(
+        {{"0123456789abcdef0123456789abcdef", "RB Playlist",
+          {123456789, 123456790}}},
+        rbOfficial / "playlist.plist");
+
+    auto rbLoaded = bmt::LoadRBPacks({
+        {bmt::DLCType::Official, rbOfficial},
+        {bmt::DLCType::Custom, rbDuplicate},
+    }, {.mode = bmt::LoadMode::Lazy, .failureMode = bmt::FailureMode::Strict});
+    assert(rbLoaded.packs.size() == 2);
+    assert(rbLoaded.droppedDuplicates == 1);
+    assert(rbLoaded.extensions.size() == 1);
+    assert(rbLoaded.playlists.size() == 1);
+    assert(rbLoaded.packs.at(123456789).front().decodeType == 0);
+    assert(rbLoaded.packs.at(123456790).front().decodeType == 1);
+
+    const auto rbMerged = rbBuild / "merged";
+    bmt::ExportRBPacks(
+        rbLoaded, rbMerged,
+        {.encryptRB = true,
+         .outputKey = bmt::RBOutputKey::Preserve,
+         .mulistKey = std::string("RB-LIST-KEY")});
+    assert(std::filesystem::is_regular_file(rbMerged / "123456789.rb"));
+    assert(std::filesystem::is_regular_file(rbMerged / "123456790.rb"));
+    assert(std::filesystem::is_regular_file(rbMerged / "mulist.plist"));
+    assert(std::filesystem::is_regular_file(rbMerged / "nolist.plist"));
+    assert(std::filesystem::is_regular_file(rbMerged / "playlist.plist"));
+    assert(std::filesystem::is_regular_file(rbMerged / "mulist"));
+    assert(std::filesystem::is_regular_file(rbMerged / "nolist"));
+    assert(std::filesystem::is_regular_file(rbMerged / "playlist"));
+    assert(bmt::DecryptRBList(rbMerged / "mulist", "RB-LIST-KEY") ==
+           ReadBytes(rbMerged / "mulist.plist"));
+    assert(bmt::DecryptRBList(rbMerged / "nolist", "RB-LIST-KEY") ==
+           ReadBytes(rbMerged / "nolist.plist"));
+    const auto rbReloaded = bmt::LoadRBPacks(
+        {{bmt::DLCType::Official, rbMerged}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict,
+         .mulistKey = std::string("RB-LIST-KEY")});
+    assert(rbReloaded.packs.size() == 2);
+    assert(rbReloaded.packs.at(123456789).front().resources.at("unknown/member").Data() ==
+           ReadBytes(rbExpanded / "unknown/member"));
+    assert(rbReloaded.extensions.size() == 1);
+    assert(rbReloaded.extensions.front().packID == 42);
+    assert(rbReloaded.playlists.front().musicIDs ==
+           (std::vector<uint32_t>{123456789, 123456790}));
 
     std::filesystem::remove_all(output);
 
