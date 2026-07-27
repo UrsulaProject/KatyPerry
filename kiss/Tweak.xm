@@ -7,8 +7,8 @@
 #define FPS_KEY @"KISS_FORCED_FPS"
 #define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
 
-static id activeGameController;
-static unsigned int pendingButtonDown;
+static id activeGameController = nil;
+static unsigned int pendingButtonDown = 0;
 
 static NSString* getDocumentsPath(){
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
@@ -71,6 +71,29 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
         initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self
         action:@selector(closeSettings)] autorelease];
+
+    UIView *background = [[[UIView alloc]
+        initWithFrame:CGRectMake(0, 0, 0, 0)] autorelease];
+    UILabel *version = [[[UILabel alloc]
+        initWithFrame:CGRectMake(0, 0, 0, 0)] autorelease];
+    UIFontDescriptorSymbolicTraits traits =
+        UIFontDescriptorTraitBold | UIFontDescriptorTraitItalic;
+    UIFontDescriptor *descriptor = [[[UIFont systemFontOfSize:
+        [UIFont smallSystemFontSize]] fontDescriptor]
+        fontDescriptorWithSymbolicTraits:traits];
+    version.font = [UIFont fontWithDescriptor:descriptor size:0];
+    version.text = [NSString stringWithFormat:@"KISS %s @ %s",GIT_COMMIT_HASH,GIT_REFSPEC];
+    version.textAlignment = NSTextAlignmentCenter;
+    version.textColor = [UIColor grayColor];
+    version.translatesAutoresizingMaskIntoConstraints = NO;
+    [background addSubview:version];
+    [NSLayoutConstraint activateConstraints:@[
+        [version.leadingAnchor constraintEqualToAnchor:background.leadingAnchor],
+        [version.trailingAnchor constraintEqualToAnchor:background.trailingAnchor],
+        [version.bottomAnchor constraintEqualToAnchor:
+            background.layoutMarginsGuide.bottomAnchor]
+    ]];
+    [(UITableViewController *)self tableView].backgroundView = background;
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
