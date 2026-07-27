@@ -899,6 +899,18 @@ int RunTests()
             bmt::RBImageKind::Artwork, bmt::RBImageScale::OneX,
             bmt::RBDifficulty::Basic)));
 
+#ifndef _WIN32
+    const auto rbSymlinkInput = rbRoot / "symlink-input";
+    const auto rbSymlinkOutput = rbRoot / "symlink-output";
+    std::filesystem::create_directories(rbSymlinkInput);
+    std::filesystem::create_symlink(
+        std::filesystem::absolute(rbPlain),
+        rbSymlinkInput / "123456789.rb");
+    bmt::UnpackRBDirectory(rbSymlinkInput, rbSymlinkOutput);
+    assert(ReadBytes(rbSymlinkOutput / "123456789" / "note_har2") ==
+           ReadBytes(rbExpanded / "note_har2"));
+#endif
+
     const auto paddedRBDirectory = rbRoot / "padded-id";
     std::filesystem::create_directories(paddedRBDirectory);
     std::filesystem::copy_file(rbPlain,

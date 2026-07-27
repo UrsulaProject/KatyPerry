@@ -857,7 +857,11 @@ namespace bmt
         eager.mode = LoadMode::Eager;
         for (const auto& input : RecursiveRBFiles(inputDirectory))
         {
-            fs::path relative = fs::relative(input, inputDirectory);
+            fs::path relative = input.lexically_relative(inputDirectory);
+            if (relative.empty() ||
+                (relative.begin() != relative.end() && *relative.begin() == ".."))
+                throw std::runtime_error("RB input escaped its source directory: " +
+                                         input.string());
             relative.replace_extension();
             auto pack = LoadOneRB(input, eager, hot);
             ExtractPack(pack, outputDirectory / relative);
