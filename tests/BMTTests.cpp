@@ -1184,6 +1184,24 @@ int RunTests()
     assert(rbReloaded.playlists.front().musicIDs ==
            (std::vector<uint32_t>{123456789, 123456790}));
 
+    auto rbHotRelation = bmt::LoadRBPacks(
+        {{bmt::DLCType::Official, rbOfficial}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict});
+    rbHotRelation.extensions.clear();
+    rbHotRelation.packs.at(123456790).front().hotMainID = 123456789;
+    const auto rbHotRelationOutput = rbBuild / "hot-relation-without-pack-id";
+    bmt::ExportRBPacks(rbHotRelation, rbHotRelationOutput,
+                       {.encryptRB = true});
+    const auto rbHotRelationReloaded = bmt::LoadRBPacks(
+        {{bmt::DLCType::Official, rbHotRelationOutput}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict});
+    assert(rbHotRelationReloaded.extensions.size() == 1);
+    assert(rbHotRelationReloaded.extensions.front().baseID == 123456789);
+    assert(rbHotRelationReloaded.extensions.front().extID == 123456790);
+    assert(!rbHotRelationReloaded.extensions.front().hasPackID);
+
     const auto rbConflict = rbBuild / "custom-conflict";
     const auto rbConflictExpanded = rbBuild / "custom-conflict-expanded";
     WriteText(rbConflictExpanded / "info", rbInfo);

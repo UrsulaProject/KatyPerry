@@ -1220,10 +1220,6 @@ namespace
     void ValidateRBRelationships(bmt::RBLoadResult& result,
                                  bmt::FailureMode failureMode)
     {
-        std::set<std::pair<uint32_t, uint32_t>> relationsWithPackID;
-        for (const auto& relation : result.extensions)
-            if (relation.hasPackID)
-                relationsWithPackID.emplace(relation.baseID, relation.extID);
         for (const auto& relation : result.extensions)
         {
             if (result.packs.contains(relation.baseID) &&
@@ -1251,12 +1247,6 @@ namespace
                 if (failureMode == bmt::FailureMode::Strict)
                     throw std::runtime_error(message);
             }
-            if (!relationsWithPackID.contains({pack.hotMainID, id}))
-                AddRBWarning(
-                    result, pack.sourcePath,
-                    "omitting nolist relation " + std::to_string(pack.hotMainID) +
-                    " -> " + std::to_string(id) +
-                    " because no source PackID is available");
         }
     }
 
@@ -1377,20 +1367,12 @@ namespace
                 AddRBWarning(result, path, message);
                 continue;
             }
-            if (!relation.hasPackID)
-            {
-                AddRBWarning(
-                    result, extension->second.front().sourcePath,
-                    "omitting nolist relation " + std::to_string(relation.baseID) +
-                    " -> " + std::to_string(relation.extID) +
-                    " because no source PackID is available");
-                continue;
-            }
             if (!relation.extLevel)
                 relation.extLevel = extension->second.front().basic;
             plist_t item = plist_new_dict();
             plist_dict_set_item(item, "ExtID", plist_new_uint(relation.extID));
-            plist_dict_set_item(item, "PackID", plist_new_uint(relation.packID));
+            if (relation.hasPackID)
+                plist_dict_set_item(item, "PackID", plist_new_uint(relation.packID));
             plist_dict_set_item(item, "ID", plist_new_uint(relation.baseID));
             plist_dict_set_item(item, "ExtLevel", plist_new_uint(relation.extLevel));
             if (!relation.comment.empty())

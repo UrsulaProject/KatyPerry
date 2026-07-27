@@ -426,8 +426,9 @@ RB-OUT/
 ```
 
 mulist 只包含普通/base 曲目。官方/custom 的 SPECIAL 关系来自 nolist；RBHot
-`mainId` 只用于识别 base/ext 和冲突组件。没有来源 nolist `PackID` 时，工具会
-保留 ext `.rb`、从 mulist 排除它、警告并省略该 nolist 项，不会猜测 PackID。
+`mainId` 用于识别 base/ext 和冲突组件。没有来源 nolist `PackID` 时，工具仍会
+生成包含 `ExtID/ID/ExtLevel` 的 nolist 项，但不会猜测或写入 `PackID`。原版
+`MusicDataExtend` 加载本地 nolist 时不读取 `PackID`。
 
 ### `rbhot defaults-dump`
 
