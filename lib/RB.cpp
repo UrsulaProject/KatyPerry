@@ -1626,15 +1626,13 @@ namespace bmt
         WriteFile(outputDirectory / "mulist.plist", mulist);
         WriteFile(outputDirectory / "nolist.plist", nolist);
         if (!playlist.empty())
-            WriteFile(outputDirectory / "playlist.plist", playlist);
+            WriteFile(outputDirectory / "playlist", playlist);
         if (options.mulistKey)
         {
             WriteFile(outputDirectory / "mulist",
                       detail::EncryptPrefixedBFContainer(mulist, *options.mulistKey));
             WriteFile(outputDirectory / "nolist",
                       detail::EncryptPrefixedBFContainer(nolist, *options.mulistKey));
-            if (!playlist.empty())
-                WriteFile(outputDirectory / "playlist", playlist);
         }
     }
 }

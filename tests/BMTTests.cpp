@@ -1210,7 +1210,7 @@ int RunTests()
     assert(std::filesystem::is_regular_file(rbMerged / "123456790.rb"));
     assert(std::filesystem::is_regular_file(rbMerged / "mulist.plist"));
     assert(std::filesystem::is_regular_file(rbMerged / "nolist.plist"));
-    assert(std::filesystem::is_regular_file(rbMerged / "playlist.plist"));
+    assert(!std::filesystem::exists(rbMerged / "playlist.plist"));
     assert(std::filesystem::is_regular_file(rbMerged / "mulist"));
     assert(std::filesystem::is_regular_file(rbMerged / "nolist"));
     assert(std::filesystem::is_regular_file(rbMerged / "playlist"));
@@ -1240,6 +1240,8 @@ int RunTests()
     const auto rbHotRelationOutput = rbBuild / "hot-relation-without-pack-id";
     bmt::ExportRBPacks(rbHotRelation, rbHotRelationOutput,
                        {.encryptRB = true});
+    assert(!std::filesystem::exists(rbHotRelationOutput / "playlist.plist"));
+    assert(std::filesystem::is_regular_file(rbHotRelationOutput / "playlist"));
     const auto rbHotRelationReloaded = bmt::LoadRBPacks(
         {{bmt::DLCType::Official, rbHotRelationOutput}},
         {.mode = bmt::LoadMode::Eager,

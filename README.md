@@ -420,10 +420,9 @@ RB-OUT/
 ├── 806202001.rb
 ├── mulist.plist
 ├── nolist.plist
-├── playlist.plist       # 有 playlist 时
+├── playlist             # 有 playlist 时；无后缀的明文运行时格式
 ├── mulist               # 指定 --mulist-key 时
 ├── nolist               # 指定 --mulist-key 时
-└── playlist             # 指定 key 且有 playlist 时，原版明文运行时格式
 ```
 
 mulist 只包含普通/base 曲目。官方/custom 的 SPECIAL 关系来自 nolist；RBHot
