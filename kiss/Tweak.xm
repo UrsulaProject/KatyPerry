@@ -3,18 +3,82 @@
 #include <Foundation/Foundation.h>
 #include <UIKit/UIKit.h>
 #include <QuartzCore/QuartzCore.h>
+#include "fishhook.h"
 #define MULIST_KEY @"SHARED_KEY"
 #define FPS_KEY @"KISS_FORCED_FPS"
 #define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
 
-static id activeGameController = nil;
-static unsigned int pendingButtonDown = 0;
 
 static NSString* getDocumentsPath(){
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     return [paths objectAtIndex:0];
 }
+// DirectoryRedirect.m
 
+#import <Foundation/Foundation.h>
+#import "fishhook.h"
+
+typedef NSArray<NSString *> *(*NSSearchPathFn)(
+    NSSearchPathDirectory directory,
+    NSSearchPathDomainMask domainMask,
+    BOOL expandTilde
+);
+
+static NSSearchPathFn original_NSSearchPathForDirectoriesInDomains = NULL;
+
+static NSArray<NSString *> *
+replaced_NSSearchPathForDirectoriesInDomains(
+    NSSearchPathDirectory directory,
+    NSSearchPathDomainMask domainMask,
+    BOOL expandTilde)
+{
+    NSFileManager* fm = [NSFileManager defaultManager];
+    switch(directory){
+        case NSLibraryDirectory:{
+            NSString* dir = [getDocumentsPath() stringByAppendingPathComponent:@"Library"];
+            if(![fm fileExistsAtPath:dir]){
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            }
+            return @[dir];
+        }
+        case NSCachesDirectory:{
+            NSString* dir = [getDocumentsPath() stringByAppendingPathComponent:@"Caches"];
+            if(![fm fileExistsAtPath:dir]){
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            }
+            return @[dir];
+        }
+        default:{
+            break;
+        }
+    }
+    return original_NSSearchPathForDirectoriesInDomains(
+            directory,
+            domainMask,
+            expandTilde
+    );
+}
+
+void InstallDirectoryRedirect(void)
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        struct rebinding binding = {
+            .name = "NSSearchPathForDirectoriesInDomains",
+            .replacement =
+                (void *)replaced_NSSearchPathForDirectoriesInDomains,
+            .replaced =
+                (void **)&original_NSSearchPathForDirectoriesInDomains,
+        };
+
+        int result = rebind_symbols(&binding, 1);
+        NSLog(@"[KISS] fishhook rebind result: %d", result);
+    });
+}
+
+#pragma region "Jubeat"
+static id activeGameController = nil;
+static unsigned int pendingButtonDown = 0;
 static NSInteger selectedFPS(){
     NSInteger fps = [[NSUserDefaults standardUserDefaults] integerForKey:FPS_KEY];
     return fps == 60 || (fps == 120 && [UIScreen mainScreen].maximumFramesPerSecond >= 120) ? fps : 30;
@@ -63,6 +127,100 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
     return bits;
 }
 
+%group Jubeat
+%hook JubeatAppDelegate
++(NSString*)appLibraryDirectory{
+    return getDocumentsPath();
+}
++(NSString*)appCachesDirectory{
+    return getDocumentsPath();
+}
+-(NSString*)musicListKey{
+    return MULIST_KEY;
+}
+%end
+%hook MarkerManager
++(NSString*)getMarkerDirectoryPath{
+    NSString* appendPath = [getDocumentsPath() stringByAppendingPathComponent:@"marker"];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    if(![fm fileExistsAtPath:appendPath]){
+        [fm createDirectoryAtPath:appendPath withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return appendPath;
+}
+%end
+%hook TweetResourceManager
++(NSString*)getAppendResourcePath{
+    NSString* appendPath = [getDocumentsPath() stringByAppendingPathComponent:@"appendData"];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    if(![fm fileExistsAtPath:appendPath]){
+        [fm createDirectoryAtPath:appendPath withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    return appendPath;
+}
+%end
+
+%hook MusicSelectViewController
+- (void)viewDidLoad {
+    %orig;
+    UITapGestureRecognizer *gesture = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(openBemaniSettings:)];
+    gesture.numberOfTouchesRequired = 2;
+    gesture.numberOfTapsRequired = 2;
+    [[self view] addGestureRecognizer:gesture];
+    [gesture release];
+}
+%new
+- (void)openBemaniSettings:(UITapGestureRecognizer *)gesture {
+    UIViewController *settings = [[objc_getClass("BemaniSettingsViewController") alloc]
+        initWithStyle:UITableViewStyleGrouped];
+    UINavigationController *navigation = [[UINavigationController alloc]
+        initWithRootViewController:settings];
+    navigation.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:navigation animated:YES completion:nil];
+    [navigation release];
+    [settings release];
+}
+%end
+
+%hook GameViewController
+- (void)startAnimation {
+    activeGameController = self;
+    pendingButtonDown = 0;
+    CADisplayLink *old = [self valueForKey:@"displayLink"];
+    [old invalidate];
+    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:self selector:@selector(loop:)];
+    NSInteger fps = selectedFPS();
+    if (@available(iOS 15.0, *))
+        link.preferredFrameRateRange = CAFrameRateRangeMake(fps, fps, fps);
+    else
+        link.preferredFramesPerSecond = fps;
+    [link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
+    [self setValue:link forKey:@"displayLink"];
+}
+- (void)dealloc {
+    if (activeGameController == self)
+        activeGameController = nil;
+    %orig;
+}
+%end
+
+%hook EAGLView
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
+    %orig;
+    if (inputEdgeFixEnabled())
+        pendingButtonDown |= buttonBitsForTouches(touches, (UIView *)self);
+}
+%end
+
+%hook Sequence
+- (void)judge:(unsigned int)buttonDown btnPress:(unsigned int)buttonPress {
+    if (inputEdgeFixEnabled())
+        buttonDown |= pendingButtonDown & buttonPress;
+    pendingButtonDown = 0;
+    %orig(buttonDown, buttonPress);
+}
+%end
 %subclass BemaniSettingsViewController : UITableViewController
 - (void)viewDidLoad {
     %orig;
@@ -160,99 +318,64 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 %end
+%end
+#pragma endregion
 
-%group Jubeat
-%hook JubeatAppDelegate
-+(NSString*)appLibraryDirectory{
-    return getDocumentsPath();
-}
-+(NSString*)appCachesDirectory{
-    return getDocumentsPath();
-}
--(NSString*)musicListKey{
+%group ReflecBeat
+%hook AppDelegate
++(NSString*)musicListKey{
     return MULIST_KEY;
 }
 %end
-%hook MarkerManager
-+(NSString*)getMarkerDirectoryPath{
-    NSString* appendPath = [getDocumentsPath() stringByAppendingPathComponent:@"marker"];
-    NSFileManager* fm = [NSFileManager defaultManager];
-    if(![fm fileExistsAtPath:appendPath]){
-        [fm createDirectoryAtPath:appendPath withIntermediateDirectories:YES attributes:nil error:nil];
-    }
-    return appendPath;
-}
-%end
-%hook TweetResourceManager
-+(NSString*)getAppendResourcePath{
-    NSString* appendPath = [getDocumentsPath() stringByAppendingPathComponent:@"appendData"];
-    NSFileManager* fm = [NSFileManager defaultManager];
-    if(![fm fileExistsAtPath:appendPath]){
-        [fm createDirectoryAtPath:appendPath withIntermediateDirectories:YES attributes:nil error:nil];
-    }
-    return appendPath;
+
+%hook RBPurchaseManager
+- (BOOL)isPurchased:(id)arg1 {
+    return YES;
 }
 %end
 
-%hook MusicSelectViewController
-- (void)viewDidLoad {
-    %orig;
-    UITapGestureRecognizer *gesture = [[UITapGestureRecognizer alloc]
-        initWithTarget:self action:@selector(openBemaniSettings:)];
-    gesture.numberOfTouchesRequired = 2;
-    gesture.numberOfTapsRequired = 2;
-    [[self view] addGestureRecognizer:gesture];
-    [gesture release];
+%hook RBExperienceData
+- (BOOL)unlockWithThemaID:(int)arg1 {
+    return YES;
 }
-%new
-- (void)openBemaniSettings:(UITapGestureRecognizer *)gesture {
-    UIViewController *settings = [[objc_getClass("BemaniSettingsViewController") alloc]
-        initWithStyle:UITableViewStyleGrouped];
-    UINavigationController *navigation = [[UINavigationController alloc]
-        initWithRootViewController:settings];
-    navigation.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self presentViewController:navigation animated:YES completion:nil];
-    [navigation release];
-    [settings release];
+- (BOOL)unlockWithMusicID:(int)arg1 {
+    return YES;
 }
-%end
-
-%hook GameViewController
-- (void)startAnimation {
-    activeGameController = self;
-    pendingButtonDown = 0;
-    CADisplayLink *old = [self valueForKey:@"displayLink"];
-    [old invalidate];
-    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:self selector:@selector(loop:)];
-    NSInteger fps = selectedFPS();
-    if (@available(iOS 15.0, *))
-        link.preferredFrameRateRange = CAFrameRateRangeMake(fps, fps, fps);
-    else
-        link.preferredFramesPerSecond = fps;
-    [link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
-    [self setValue:link forKey:@"displayLink"];
+- (BOOL)unlockWithBackgroundType:(int)arg1 {
+    return YES;
 }
-- (void)dealloc {
-    if (activeGameController == self)
-        activeGameController = nil;
-    %orig;
+- (BOOL)unlockWithFrameType:(int)arg1 {
+    return YES;
+}
+- (BOOL)unlockWithExprosionType:(int)arg1 {
+    return YES;
+}
+- (BOOL)unlockWithShotType:(int)arg1 {
+    return YES;
+}
+- (BOOL)unlockWithBGMtype:(int)arg1 {
+    return YES;
+}
+- (float)getPoint {
+    return 999999;
 }
 %end
 
-%hook EAGLView
-- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
-    %orig;
-    if (inputEdgeFixEnabled())
-        pendingButtonDown |= buttonBitsForTouches(touches, (UIView *)self);
+%hook RBTutorialManager
++ (BOOL)needStartTutorialStore {
+    return NO;
 }
-%end
-
-%hook Sequence
-- (void)judge:(unsigned int)buttonDown btnPress:(unsigned int)buttonPress {
-    if (inputEdgeFixEnabled())
-        buttonDown |= pendingButtonDown & buttonPress;
-    pendingButtonDown = 0;
-    %orig(buttonDown, buttonPress);
++ (BOOL)needStartTutorialCustomize {
+    return NO;
+}
++ (BOOL)needStartTutorialPlay {
+    return NO;
+}
++ (BOOL)needStartTutorialMusicselect {
+    return NO;
+}
++ (BOOL)isTutorial {
+    return NO;
 }
 %end
 %end
@@ -260,7 +383,7 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
 
 %ctor{
     if(objc_getClass("JubeatAppDelegate")){
-        %init(_ungrouped);
+        NSLog(@"Initializing Jubeat Hooks");
         %init(Jubeat);
         // Set MarkerInfo
         NSString *path = [[getDocumentsPath() stringByAppendingPathComponent:@"marker"] stringByAppendingPathComponent:@"marker-list.plist"];
@@ -282,5 +405,10 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
             [[NSUserDefaults standardUserDefaults] synchronize];
             [markerList release];
         }
-    }  
+    }
+    else if(objc_getClass("RBPurchaseManager")){
+        NSLog(@"Initializing ReflecBeat Hooks");
+        InstallDirectoryRedirect();
+        %init(ReflecBeat);
+    }
 }

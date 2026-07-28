@@ -14,10 +14,11 @@ endif()
 message(STATUS "[KISS] Git Branch : ${GIT_REFSPEC}")
 message(STATUS "[KISS] Git SHA1 : ${GIT_COMMIT_HASH}")
 am_init("Naville")
-am_add_tweak(NAME KISS SRCS "${CMAKE_CURRENT_LIST_DIR}/Tweak.xm" NOSUBSTRATE)
+am_add_tweak(NAME KISS SRCS "${CMAKE_CURRENT_LIST_DIR}/Tweak.xm" "${CMAKE_CURRENT_LIST_DIR}/fishhook.c" NOSUBSTRATE)
 find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
 find_library(UIKIT_LIBRARY UIKit REQUIRED)
 find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
+target_include_directories(KISS PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
 target_link_libraries(KISS PUBLIC
     ${FOUNDATION_LIBRARY}
     ${UIKIT_LIBRARY}
