@@ -1161,7 +1161,9 @@ int RunTests()
     const auto rbExtIDPosition = rbExtInfo.find("123456789");
     assert(rbExtIDPosition != std::string::npos);
     rbExtInfo.replace(rbExtIDPosition, 9, "123456790");
-    WriteText(rbExtExpanded / "info", rbExtInfo);
+    std::vector<uint8_t> rbExtInfoWithBOM = {0xef, 0xbb, 0xbf};
+    rbExtInfoWithBOM.insert(rbExtInfoWithBOM.end(), rbExtInfo.begin(), rbExtInfo.end());
+    WriteBytes(rbExtExpanded / "info", rbExtInfoWithBOM);
     WriteBytes(rbExtExpanded / "note_bas", {'R', 'B', 'F', 'F', 9, 9, 9});
     bmt::PackRB(rbExtExpanded, rbOfficial / "123456790.rb", uint8_t{1});
 

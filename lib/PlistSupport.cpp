@@ -16,6 +16,10 @@ namespace bmt::detail
     {
         if (data.size() > std::numeric_limits<uint32_t>::max())
             throw std::runtime_error("plist is too large");
+        constexpr uint8_t utf8BOM[] = {0xef, 0xbb, 0xbf};
+        if (data.size() >= sizeof(utf8BOM) &&
+            std::memcmp(data.data(), utf8BOM, sizeof(utf8BOM)) == 0)
+            data = data.subspan(sizeof(utf8BOM));
         std::string normalized;
         const char* input = reinterpret_cast<const char*>(data.data());
         size_t inputSize = data.size();
