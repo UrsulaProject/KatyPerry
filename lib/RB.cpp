@@ -106,6 +106,22 @@ namespace
                std::memcmp(data.data(), value.data(), value.size()) == 0;
     }
 
+    std::string_view CanonicalRBMemberName(std::string_view name) noexcept
+    {
+        // Some community packs typo the Basic artwork suffix as "p" instead of "b".
+        if (name == "artwork_p")
+            return "artwork_b";
+        if (name == "artwork_p2x")
+            return "artwork2x_b";
+        if (name == "artwork_b2x")
+            return "artwork2x_b";
+        if (name == "artwork_m2x")
+            return "artwork2x_m";
+        if (name == "artwork_h2x")
+            return "artwork2x_h";
+        return name;
+    }
+
     uint32_t ParseUInt(std::string_view value, std::string_view context)
     {
         uint64_t parsed = 0;
@@ -529,13 +545,22 @@ namespace
                                      filenameID);
         const uint32_t fileID = ParseUInt(filenameID, "RB filename ID");
         const auto names = ListZipEntries(path);
-        for (const auto& name : names)
-            if (std::find(RBMembers.begin(), RBMembers.end(), name) == RBMembers.end())
-                throw std::runtime_error("RB package contains an unsupported member: " + name);
-        if (std::find(names.begin(), names.end(), "info") == names.end())
+        std::map<std::string, std::string> members;
+        for (const auto& sourceName : names)
+        {
+            const std::string canonicalName(CanonicalRBMemberName(sourceName));
+            if (std::find(RBMembers.begin(), RBMembers.end(), canonicalName) ==
+                RBMembers.end())
+                throw std::runtime_error("RB package contains an unsupported member: " +
+                                         sourceName);
+            const auto [member, inserted] = members.emplace(canonicalName, sourceName);
+            if (!inserted && sourceName == canonicalName)
+                member->second = sourceName;
+        }
+        if (!members.contains("info"))
             throw std::runtime_error("RB package has no info member");
 
-        auto rawInfo = ReadZipEntry(path, "info");
+        auto rawInfo = ReadZipEntry(path, members.at("info"));
         bmt::RBMusicPack pack;
         pack.sourcePath = path;
         pack.sourceFileID = fileID;
@@ -567,7 +592,7 @@ namespace
                                      " does not match filename ID " +
                                      std::to_string(fileID));
 
-        for (const auto& name : names)
+        for (const auto& [name, sourceName] : members)
         {
             bmt::PackResource resource;
             resource.name = name;
@@ -575,9 +600,9 @@ namespace
                 resource.bytes = info;
             else
             {
-                const auto loader = [path, name, decodeType = pack.decodeType, hot, fileID]
+                const auto loader = [path, sourceName, decodeType = pack.decodeType, hot, fileID]
                 {
-                    return DecodeResource(ReadZipEntry(path, name), decodeType, hot, fileID);
+                    return DecodeResource(ReadZipEntry(path, sourceName), decodeType, hot, fileID);
                 };
                 if (options.mode == bmt::LoadMode::Eager)
                     resource.bytes = loader();

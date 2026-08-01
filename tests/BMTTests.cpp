@@ -935,6 +935,42 @@ int RunTests()
     }
     assert(rejectedUnsupportedRBMember);
 
+    const auto rbAliasExpanded = output / "rb-alias-expanded";
+    const auto rbAliasSource = output / "rb-alias-source";
+    WriteText(rbAliasExpanded / "info", rbInfo);
+    WriteBytes(rbAliasExpanded / "artwork_b2x", {1});
+    WriteBytes(rbAliasExpanded / "artwork_m2x", {2});
+    WriteBytes(rbAliasExpanded / "artwork2x_m", {3});
+    WriteBytes(rbAliasExpanded / "artwork_h2x", {4});
+    bmt::PackRB(rbAliasExpanded, rbAliasSource / "123456789.rb", std::nullopt);
+
+    const auto rbPAliasExpanded = output / "rb-p-alias-expanded";
+    std::string rbPAliasInfo = rbInfo;
+    const auto rbPAliasIDPosition = rbPAliasInfo.find("123456789");
+    assert(rbPAliasIDPosition != std::string::npos);
+    rbPAliasInfo.replace(rbPAliasIDPosition, 9, "123456790");
+    WriteText(rbPAliasExpanded / "info", rbPAliasInfo);
+    WriteBytes(rbPAliasExpanded / "artwork_p", {5});
+    WriteBytes(rbPAliasExpanded / "artwork_p2x", {6});
+    bmt::PackRB(rbPAliasExpanded, rbAliasSource / "123456790.rb", std::nullopt);
+
+    auto rbAliasLoaded = bmt::LoadRBPacks(
+        {{bmt::DLCType::Custom, rbAliasSource}},
+        {.mode = bmt::LoadMode::Eager,
+         .failureMode = bmt::FailureMode::Strict});
+    const auto& rbAliasResources = rbAliasLoaded.packs.at(123456789).front().resources;
+    assert(rbAliasResources.at("artwork2x_b").Data() == std::vector<uint8_t>{1});
+    assert(rbAliasResources.at("artwork2x_m").Data() == std::vector<uint8_t>{3});
+    assert(rbAliasResources.at("artwork2x_h").Data() == std::vector<uint8_t>{4});
+    assert(!rbAliasResources.contains("artwork_b2x"));
+    assert(!rbAliasResources.contains("artwork_m2x"));
+    assert(!rbAliasResources.contains("artwork_h2x"));
+    const auto& rbPAliasResources = rbAliasLoaded.packs.at(123456790).front().resources;
+    assert(rbPAliasResources.at("artwork_b").Data() == std::vector<uint8_t>{5});
+    assert(rbPAliasResources.at("artwork2x_b").Data() == std::vector<uint8_t>{6});
+    assert(!rbPAliasResources.contains("artwork_p"));
+    assert(!rbPAliasResources.contains("artwork_p2x"));
+
     const auto typedRB = bmt::LoadRBPacks(
         {{bmt::DLCType::Official, rbRoot}},
         {.mode = bmt::LoadMode::Eager,
