@@ -855,8 +855,10 @@ namespace bmt
                 LoadRBHotDefaults(*options.rbhotDefaultsPlist).music);
         auto eager = options;
         eager.mode = LoadMode::Eager;
-        for (const auto& input : RecursiveRBFiles(inputDirectory))
+        const auto inputs = RecursiveRBFiles(inputDirectory);
+        detail::ParallelFor(inputs.size(), options.jobs, [&](size_t index)
         {
+            const auto& input = inputs[index];
             fs::path relative = input.lexically_relative(inputDirectory);
             if (relative.empty() ||
                 (relative.begin() != relative.end() && *relative.begin() == ".."))
@@ -865,22 +867,25 @@ namespace bmt
             relative.replace_extension();
             auto pack = LoadOneRB(input, eager, hot);
             ExtractPack(pack, outputDirectory / relative);
-        }
+        });
     }
 
     void PackRBDirectory(const fs::path& inputDirectory,
                          const fs::path& outputDirectory,
-                         std::optional<uint8_t> decodeType)
+                         std::optional<uint8_t> decodeType,
+                         size_t jobs)
     {
-        for (const auto& directory : ExpandedRBDirectories(inputDirectory))
+        const auto directories = ExpandedRBDirectories(inputDirectory);
+        detail::ParallelFor(directories.size(), jobs, [&](size_t index)
         {
+            const auto& directory = directories[index];
             fs::path relative = fs::relative(directory, inputDirectory);
             if (relative.empty() || relative == ".")
                 relative = inputDirectory.filename();
             relative += ".rb";
             auto pack = LoadExpandedRB(directory);
             WriteRB(pack, outputDirectory / relative, decodeType);
-        }
+        });
     }
 
     std::map<std::string, std::string> DumpRBHotDefaults(const fs::path& defaultsPlist)
@@ -1515,21 +1520,39 @@ namespace bmt
                 if (entry.is_regular_file() && entry.path().extension() == ".rb")
                     files.push_back(entry.path());
             std::sort(files.begin(), files.end());
-            for (const auto& path : files)
+            struct LoadAttempt
             {
+                std::optional<RBMusicPack> pack;
+                std::string error;
+            };
+            std::vector<LoadAttempt> attempts(files.size());
+            detail::ParallelFor(files.size(), options.jobs, [&](size_t index)
+            {
+                const auto& path = files[index];
                 try
                 {
                     auto pack = LoadOneRB(path, options, hotMusic);
                     pack.dlcType = source.type;
                     pack.dlcOrder = sourceIndex;
-                    current.packs[pack.id].push_back(std::move(pack));
+                    attempts[index].pack = std::move(pack);
                 }
                 catch (const std::exception& error)
                 {
-                    result.diagnostics.push_back({path, error.what()});
-                    if (options.failureMode == FailureMode::Strict)
-                        throw;
+                    attempts[index].error = error.what();
                 }
+            });
+            for (size_t index = 0; index < files.size(); ++index)
+            {
+                auto& attempt = attempts[index];
+                if (!attempt.pack)
+                {
+                    result.diagnostics.push_back({files[index], attempt.error});
+                    if (options.failureMode == FailureMode::Strict)
+                        throw std::runtime_error(attempt.error);
+                    continue;
+                }
+                const uint32_t id = attempt.pack->id;
+                current.packs[id].push_back(std::move(*attempt.pack));
             }
             if (source.type == DLCType::JBHot)
             {
@@ -1600,6 +1623,14 @@ namespace bmt
                    ("custom-" + std::to_string(customNumbers.at(pack.dlcOrder)));
         };
 
+        struct WriteJob
+        {
+            RBMusicPack* pack = nullptr;
+            fs::path path;
+            std::optional<uint8_t> decodeType;
+        };
+        std::vector<WriteJob> writeJobs;
+        writeJobs.reserve(result.packs.size());
         for (auto& [id, instances] : result.packs)
         {
             auto& pack = instances.front();
@@ -1621,8 +1652,13 @@ namespace bmt
                     break;
                 }
             }
-            WriteRB(pack, directory / RBFileName(id), decodeType);
+            writeJobs.push_back({&pack, directory / RBFileName(id), decodeType});
         }
+        detail::ParallelFor(writeJobs.size(), options.jobs, [&](size_t index)
+        {
+            auto& job = writeJobs[index];
+            WriteRB(*job.pack, job.path, job.decodeType);
+        });
         WriteFile(outputDirectory / "mulist.plist", mulist);
         WriteFile(outputDirectory / "nolist.plist", nolist);
         if (!playlist.empty())

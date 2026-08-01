@@ -8,13 +8,17 @@
 #include <nlohmann/json.hpp>
 #include <openssl/evp.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -128,6 +132,54 @@ namespace bmt::detail
     {
         const auto found = mapping.find(id);
         return found == mapping.end() ? id : found->second;
+    }
+
+    void ParallelFor(size_t count,
+                     size_t jobs,
+                     const std::function<void(size_t)>& operation)
+    {
+        if (!count)
+            return;
+        if (!jobs)
+            jobs = std::thread::hardware_concurrency();
+        jobs = std::max<size_t>(1, std::min(jobs, count));
+        if (jobs == 1)
+        {
+            for (size_t index = 0; index < count; ++index)
+                operation(index);
+            return;
+        }
+
+        std::atomic_size_t next{0};
+        std::vector<std::exception_ptr> errors(count);
+        const auto worker = [&]
+        {
+            for (;;)
+            {
+                const size_t index = next.fetch_add(1, std::memory_order_relaxed);
+                if (index >= count)
+                    return;
+                try
+                {
+                    operation(index);
+                }
+                catch (...)
+                {
+                    errors[index] = std::current_exception();
+                }
+            }
+        };
+
+        std::vector<std::jthread> workers;
+        workers.reserve(jobs - 1);
+        for (size_t index = 1; index < jobs; ++index)
+            workers.emplace_back(worker);
+        worker();
+        workers.clear();
+
+        for (const auto& error : errors)
+            if (error)
+                std::rethrow_exception(error);
     }
 
     std::array<uint8_t, 32> NamedContentHash(

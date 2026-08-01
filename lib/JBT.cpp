@@ -1328,8 +1328,16 @@ namespace bmt
                 playlist.dlcType = source.type;
                 playlist.dlcOrder = sourceIndex;
             }
-            for (const auto& path : ExpandInputs({source.directory}))
+            const auto paths = ExpandInputs({source.directory});
+            struct LoadAttempt
             {
+                std::optional<MusicPack> pack;
+                std::string error;
+            };
+            std::vector<LoadAttempt> attempts(paths.size());
+            bmt::detail::ParallelFor(paths.size(), options.jobs, [&](size_t index)
+            {
+                const auto& path = paths[index];
                 try
                 {
                     auto pack = LoadOnePack(path, options, musicData);
@@ -1337,14 +1345,25 @@ namespace bmt
                     pack.sourceFileID = fileID;
                     pack.dlcType = source.type;
                     pack.dlcOrder = sourceIndex;
-                    sourceResult.packs[pack.id].push_back(std::move(pack));
+                    attempts[index].pack = std::move(pack);
                 }
                 catch (const std::exception& error)
                 {
-                    result.diagnostics.push_back({path, error.what()});
-                    if (options.failureMode == FailureMode::Strict)
-                        throw;
+                    attempts[index].error = error.what();
                 }
+            });
+            for (size_t index = 0; index < paths.size(); ++index)
+            {
+                auto& attempt = attempts[index];
+                if (!attempt.pack)
+                {
+                    result.diagnostics.push_back({paths[index], attempt.error});
+                    if (options.failureMode == FailureMode::Strict)
+                        throw std::runtime_error(attempt.error);
+                    continue;
+                }
+                const uint32_t id = attempt.pack->id;
+                sourceResult.packs[id].push_back(std::move(*attempt.pack));
             }
             std::unordered_map<size_t, CatalogMap> sourceCatalog;
             if (const auto found = catalogsByDLC.find(sourceIndex); found != catalogsByDLC.end())
@@ -1400,28 +1419,33 @@ namespace bmt
     {
         auto eagerOptions = options;
         eagerOptions.mode = LoadMode::Eager;
-        for (const auto& input : RecursiveJBTFiles(inputDirectory))
+        const auto inputs = RecursiveJBTFiles(inputDirectory);
+        bmt::detail::ParallelFor(inputs.size(), options.jobs, [&](size_t index)
         {
+            const auto& input = inputs[index];
             fs::path relative = fs::relative(input, inputDirectory);
             relative.replace_extension();
             auto pack = LoadStandaloneJBT(input, eagerOptions);
             ExtractPack(pack, outputDirectory / relative);
-        }
+        });
     }
 
     void PackJBTDirectory(const fs::path& inputDirectory,
                           const fs::path& outputDirectory,
-                          bool encrypt)
+                          bool encrypt,
+                          size_t jobs)
     {
-        for (const auto& directory : ExpandedPackDirectories(inputDirectory))
+        const auto directories = ExpandedPackDirectories(inputDirectory);
+        bmt::detail::ParallelFor(directories.size(), jobs, [&](size_t index)
         {
+            const auto& directory = directories[index];
             fs::path relative = fs::relative(directory, inputDirectory);
             if (relative.empty() || relative == ".")
                 relative = inputDirectory.filename();
             relative += ".jbt";
             auto pack = LoadExpandedPack(directory);
             WriteJBT(pack, outputDirectory / relative, encrypt);
-        }
+        });
     }
 
     static void ExportPacksImpl(PackTable& packs,
@@ -1433,11 +1457,17 @@ namespace bmt
         ValidateRuntimeIDs(packs);
         const auto catalog = BuildOfficialCatalog(packs, warnings);
         const auto playlistData = playlists ? BuildOfficialPlaylists(*playlists) : std::vector<uint8_t>{};
+        std::vector<std::pair<uint32_t, MusicPack*>> packJobs;
+        packJobs.reserve(packs.size());
         for (auto& [id, instances] : packs)
         {
             if (instances.size() != 1)
                 throw std::runtime_error("cannot export unresolved duplicate ID " + std::to_string(id));
-            auto& pack = instances.front();
+            packJobs.emplace_back(id, &instances.front());
+        }
+        bmt::detail::ParallelFor(packJobs.size(), options.jobs, [&](size_t index)
+        {
+            auto& pack = *packJobs[index].second;
             RewriteInfoID(pack);
             for (const auto& [name, resource] : pack.resources)
             {
@@ -1446,7 +1476,7 @@ namespace bmt
                 if (paddedSize > std::numeric_limits<uint32_t>::max())
                     throw std::runtime_error("resource is too large to export: " + name);
             }
-        }
+        });
         fs::create_directories(outputDirectory);
 
         std::set<size_t> customOrders;
@@ -1481,12 +1511,24 @@ namespace bmt
             throw std::runtime_error("unsupported DLC type");
         };
 
+        struct WriteJob
+        {
+            MusicPack* pack = nullptr;
+            fs::path path;
+        };
+        std::vector<WriteJob> writeJobs;
+        writeJobs.reserve(packs.size());
         for (auto& [id, instances] : packs)
         {
             const auto directory = packOutputDirectory(instances.front());
             fs::create_directories(directory);
-            WriteJBT(instances.front(), directory / PackFileName(id), options.encryptJBT);
+            writeJobs.push_back({&instances.front(), directory / PackFileName(id)});
         }
+        bmt::detail::ParallelFor(writeJobs.size(), options.jobs, [&](size_t index)
+        {
+            auto& job = writeJobs[index];
+            WriteJBT(*job.pack, job.path, options.encryptJBT);
+        });
         WriteFile(outputDirectory / "mulist.plist", catalog);
         if (options.mulistKey)
         {

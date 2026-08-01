@@ -133,6 +133,7 @@ namespace bmt
         FailureMode failureMode = FailureMode::Continue;
         std::optional<std::filesystem::path> rbhotDefaultsPlist;
         std::optional<std::string> mulistKey;
+        size_t jobs = 0;
     };
 
     struct RBSource
@@ -159,6 +160,7 @@ namespace bmt
         RBOutputKey outputKey = RBOutputKey::Preserve;
         std::optional<std::string> mulistKey;
         bool separateByDLC = false;
+        size_t jobs = 0;
     };
 
     RBLoadResult LoadRBPacks(const std::vector<RBSource>& sources,
@@ -185,7 +187,8 @@ namespace bmt
                            const RBLoadOptions& options = {});
     void PackRBDirectory(const std::filesystem::path& inputDirectory,
                          const std::filesystem::path& outputDirectory,
-                         std::optional<uint8_t> decodeType = uint8_t{0});
+                         std::optional<uint8_t> decodeType = uint8_t{0},
+                         size_t jobs = 0);
 
     std::map<std::string, std::string> DumpRBHotDefaults(
         const std::filesystem::path& defaultsPlist);

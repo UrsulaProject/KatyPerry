@@ -132,6 +132,7 @@ namespace bmt
         LoadMode mode = LoadMode::Lazy;
         FailureMode failureMode = FailureMode::Continue;
         std::optional<std::filesystem::path> jbhotDefaultsPlist;
+        size_t jobs = 0;
     };
 
     struct DLCSource
@@ -163,6 +164,7 @@ namespace bmt
         bool encryptJBT = true;
         std::optional<std::string> mulistKey;
         bool separateByDLC = false;
+        size_t jobs = 0;
     };
 
     LoadResult LoadPacks(const std::vector<DLCSource>& sources,
@@ -183,7 +185,8 @@ namespace bmt
                             const LoadOptions& options = {});
     void PackJBTDirectory(const std::filesystem::path& inputDirectory,
                           const std::filesystem::path& outputDirectory,
-                          bool encrypt = true);
+                          bool encrypt = true,
+                          size_t jobs = 0);
     void ExportPacks(LoadResult& result,
                      const std::filesystem::path& outputDirectory,
                      const ExportOptions& options = {});

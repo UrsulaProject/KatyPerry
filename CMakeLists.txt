@@ -5,6 +5,7 @@ endif()
 project(BMT)
 
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(Threads REQUIRED)
 find_package(OpenSSL QUIET)
 find_package(libzip CONFIG QUIET)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -45,7 +46,7 @@ target_link_libraries(BMT PUBLIC
     ${BMT_LIBZIP_TARGET}
     ${BMT_LIBPLIST_TARGET}
     ${BMT_CRYPTO_TARGET})
-target_link_libraries(BMT PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(BMT PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 
 add_executable(BemaniTools tools/BemaniTools.cpp)
 target_link_libraries(BemaniTools PRIVATE BMT Boost::program_options)

@@ -146,12 +146,15 @@ namespace
         fs::path output;
         fs::path defaults;
         bool plain = false;
+        unsigned int jobs = 0;
         po::options_description options("jbt " + std::string(command) + " options");
         options.add_options()
             ("help,h", "show help")
             ("input,i", po::value<fs::path>(&input)->required(), "input JBT or directory")
             ("output,o", po::value<fs::path>(&output)->required(), "output JBT or directory")
             ("jbhot-plist", po::value<fs::path>(&defaults), "encrypted JBHot defaults plist")
+            ("jobs,j", po::value<unsigned int>(&jobs)->default_value(0),
+             "parallel file jobs; 0 uses available CPU cores")
             ("plain", po::bool_switch(&plain), "pack plaintext JBT members");
         const auto values = Parse(arguments, options);
         if (values.count("help"))
@@ -160,6 +163,7 @@ namespace
             return 0;
         }
         bmt::LoadOptions load;
+        load.jobs = jobs;
         if (!defaults.empty())
             load.jbhotDefaultsPlist = defaults;
         if (command == "decrypt")
@@ -173,7 +177,7 @@ namespace
         else if (command == "unpack-dir")
             bmt::UnpackJBTDirectory(input, output, load);
         else if (command == "pack-dir")
-            bmt::PackJBTDirectory(input, output, !plain);
+            bmt::PackJBTDirectory(input, output, !plain, jobs);
         else
             throw std::runtime_error("unknown jbt command " + std::string(command));
         return 0;
@@ -214,6 +218,7 @@ namespace
         bool strict = false;
         bool encryptJBT = true;
         bool separate = false;
+        unsigned int jobs = 0;
         std::string mulistKey;
         po::options_description options("dlc build options");
         options.add_options()
@@ -225,6 +230,8 @@ namespace
             ("output,o", po::value<fs::path>(&output)->required(), "output directory")
             ("eager", po::bool_switch(&eager), "materialize every resource while loading")
             ("strict", po::bool_switch(&strict), "stop at the first invalid pack")
+            ("jobs,j", po::value<unsigned int>(&jobs)->default_value(0),
+             "parallel file jobs; 0 uses available CPU cores")
             ("encrypt-jbt", po::value<bool>(&encryptJBT)->default_value(true), "encrypt output JBT members")
             ("separate-output", po::bool_switch(&separate), "write JBTs in per-DLC subdirectories")
             ("mulist-key", po::value<std::string>(&mulistKey), "also emit encrypted mulist with this raw key");
@@ -248,12 +255,14 @@ namespace
         bmt::LoadOptions load;
         load.mode = eager ? bmt::LoadMode::Eager : bmt::LoadMode::Lazy;
         load.failureMode = strict ? bmt::FailureMode::Strict : bmt::FailureMode::Continue;
+        load.jobs = jobs;
         if (!defaults.empty())
             load.jbhotDefaultsPlist = defaults;
         auto result = bmt::LoadPacks(sources, load);
         bmt::ExportOptions exportOptions;
         exportOptions.encryptJBT = encryptJBT;
         exportOptions.separateByDLC = separate;
+        exportOptions.jobs = jobs;
         if (!mulistKey.empty())
             exportOptions.mulistKey = mulistKey;
         bmt::ExportPacks(result, output, exportOptions);
@@ -274,6 +283,7 @@ namespace
         fs::path output;
         fs::path defaults;
         unsigned int decodeType = 0;
+        unsigned int jobs = 0;
         bool plain = false;
         po::options_description options("rb " + std::string(command) + " options");
         options.add_options()
@@ -283,6 +293,8 @@ namespace
             ("rbhot-plist", po::value<fs::path>(&defaults), "encrypted RBHot defaults plist")
             ("decode-type", po::value<unsigned int>(&decodeType)->default_value(0),
              "official BF DecodeType for encrypt/pack (0 or 1)")
+            ("jobs,j", po::value<unsigned int>(&jobs)->default_value(0),
+             "parallel file jobs; 0 uses available CPU cores")
             ("plain", po::bool_switch(&plain), "write plaintext RB members");
         const auto values = Parse(arguments, options);
         if (values.count("help"))
@@ -293,6 +305,7 @@ namespace
         if (decodeType > 1)
             throw std::runtime_error("--decode-type must be 0 or 1");
         bmt::RBLoadOptions load;
+        load.jobs = jobs;
         if (!defaults.empty())
             load.rbhotDefaultsPlist = defaults;
         const auto outputType =
@@ -314,7 +327,7 @@ namespace
         else if (command == "unpack-dir")
             bmt::UnpackRBDirectory(input, output, load);
         else if (command == "pack-dir")
-            bmt::PackRBDirectory(input, output, outputType);
+            bmt::PackRBDirectory(input, output, outputType, jobs);
         else
             throw std::runtime_error("unknown rb command " + std::string(command));
         return 0;
@@ -331,6 +344,7 @@ namespace
         bool strict = false;
         bool encryptRB = true;
         bool separate = false;
+        unsigned int jobs = 0;
         std::string mulistKey;
         std::string outputKey = "preserve";
         po::options_description options("rb build options");
@@ -344,6 +358,8 @@ namespace
             ("output,o", po::value<fs::path>(&output)->required(), "output directory")
             ("eager", po::bool_switch(&eager), "materialize every resource while loading")
             ("strict", po::bool_switch(&strict), "stop at the first invalid pack or relation")
+            ("jobs,j", po::value<unsigned int>(&jobs)->default_value(0),
+             "parallel file jobs; 0 uses available CPU cores")
             ("encrypt-rb", po::value<bool>(&encryptRB)->default_value(true),
              "encrypt output RB members")
             ("output-key", po::value<std::string>(&outputKey)->default_value("preserve"),
@@ -383,6 +399,7 @@ namespace
         bmt::RBLoadOptions load;
         load.mode = eager ? bmt::LoadMode::Eager : bmt::LoadMode::Lazy;
         load.failureMode = strict ? bmt::FailureMode::Strict : bmt::FailureMode::Continue;
+        load.jobs = jobs;
         if (!defaults.empty())
             load.rbhotDefaultsPlist = defaults;
         if (!mulistKey.empty())
@@ -392,6 +409,7 @@ namespace
         exportOptions.encryptRB = encryptRB;
         exportOptions.outputKey = parsedOutputKey;
         exportOptions.separateByDLC = separate;
+        exportOptions.jobs = jobs;
         if (!mulistKey.empty())
             exportOptions.mulistKey = mulistKey;
         bmt::ExportRBPacks(result, output, exportOptions);

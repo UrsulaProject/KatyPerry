@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <span>
 #include <string_view>
@@ -24,6 +25,10 @@ namespace bmt::detail
                             uint32_t minimumTargetID,
                             uint32_t maximumTargetID = UINT32_MAX);
     uint32_t MappedID(const IDMapping& mapping, uint32_t id) noexcept;
+
+    void ParallelFor(size_t count,
+                     size_t jobs,
+                     const std::function<void(size_t)>& operation);
 
     std::array<uint8_t, 32> NamedContentHash(
         std::span<const NamedByteSpan> resources,
