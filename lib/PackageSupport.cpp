@@ -170,12 +170,13 @@ namespace bmt::detail
             }
         };
 
-        std::vector<std::jthread> workers;
+        std::vector<std::thread> workers;
         workers.reserve(jobs - 1);
         for (size_t index = 1; index < jobs; ++index)
             workers.emplace_back(worker);
         worker();
-        workers.clear();
+        for (auto& thread : workers)
+            thread.join();
 
         for (const auto& error : errors)
             if (error)
