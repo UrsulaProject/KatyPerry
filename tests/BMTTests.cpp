@@ -390,8 +390,9 @@ int RunTests()
     exportPacks[catalogBase.id].push_back(std::move(catalogBase));
     exportPacks[catalogExtension.id].push_back(std::move(catalogExtension));
 
-    bmt::ExportPacks(exportResult, output);
-    auto loaded = bmt::LoadPacks({{bmt::DLCType::Custom, output}},
+    const auto jbtSource = output / "jbt-source";
+    bmt::ExportPacks(exportResult, jbtSource);
+    auto loaded = bmt::LoadPacks({{bmt::DLCType::Custom, jbtSource}},
                                  {.mode = bmt::LoadMode::Eager,
                                   .failureMode = bmt::FailureMode::Strict});
     assert(loaded.packs.size() == 5);
@@ -400,18 +401,18 @@ int RunTests()
            (std::vector<uint8_t>{'J', 'B', 'S', 'Q', 1, 2, 3, 4, 5}));
     assert(loaded.packs.at(123456789).front().resources.at("infov2").Data() ==
            std::vector<uint8_t>(info.begin(), info.end()));
-    assert(HasTrailingMD5(output / "123456789.jbt"));
+    assert(HasTrailingMD5(jbtSource / "123456789.jbt"));
     assert(loaded.packs.contains(123456790));
     assert(loaded.packs.at(123456790).front().infoRevision == bmt::InfoRevision::InfoV3);
     assert(loaded.packs.at(123456790).front().resources.at("infov3").Data() ==
            std::vector<uint8_t>(v3Info.begin(), v3Info.end()));
     const auto encryptedV3 = bmt::DecryptBFContainer(
-        ReadZipEntry(output / "123456790.jbt", "infov3"),
+        ReadZipEntry(jbtSource / "123456790.jbt", "infov3"),
         "Konami Bemani Mobile iOS");
     assert(encryptedV3.size() == v3Info.size() + 4);
     assert(std::equal(v3Info.begin(), v3Info.end(), encryptedV3.begin() + 4));
     assert(loaded.packs.at(123456791).front().infoRevision == bmt::InfoRevision::InfoV2);
-    const auto catalog = bmt::LoadOfficialCatalog(output / "mulist.plist");
+    const auto catalog = bmt::LoadOfficialCatalog(jbtSource / "mulist.plist");
     const auto extensionEntry = std::find_if(catalog.begin(), catalog.end(), [](const auto& entry)
     {
         return entry.id == 123456793;
@@ -419,8 +420,8 @@ int RunTests()
     assert(extensionEntry != catalog.end());
     assert(extensionEntry->extendFlag == 4);
     assert(extensionEntry->holdFlag == 0);
-    assert(std::filesystem::is_regular_file(output / "mulist.plist"));
-    assert(!std::filesystem::exists(output / "mulist"));
+    assert(std::filesystem::is_regular_file(jbtSource / "mulist.plist"));
+    assert(!std::filesystem::exists(jbtSource / "mulist"));
 
     const auto plaintextOutput = output / "plaintext-export";
     bmt::ExportPacks(exportResult, plaintextOutput,
@@ -448,7 +449,7 @@ int RunTests()
     const auto transformRoot = output / "jbt-transforms";
     const auto decryptedDirectory = transformRoot / "decrypted";
     const auto encryptedDirectory = transformRoot / "encrypted";
-    bmt::DecryptJBT(output / "123456789.jbt",
+    bmt::DecryptJBT(jbtSource / "123456789.jbt",
                     decryptedDirectory / "123456789.jbt");
     auto singlePlain = bmt::LoadPacks(
         {{bmt::DLCType::Custom, decryptedDirectory}},
@@ -464,7 +465,7 @@ int RunTests()
            singlePlain.packs.at(123456789).front().resources.at("seq_bas").Data());
 
     const auto unpackedDirectory = transformRoot / "unpacked" / "123456789";
-    bmt::UnpackJBT(output / "123456789.jbt", unpackedDirectory);
+    bmt::UnpackJBT(jbtSource / "123456789.jbt", unpackedDirectory);
     assert(ReadBytes(unpackedDirectory / "seq_bas") ==
            loaded.packs.at(123456789).front().resources.at("seq_bas").Data());
     const auto repackedDirectory = transformRoot / "repacked";
@@ -477,8 +478,8 @@ int RunTests()
 
     const auto batchInput = transformRoot / "batch-input";
     std::filesystem::create_directories(batchInput / "nested");
-    std::filesystem::copy_file(output / "123456789.jbt", batchInput / "123456789.jbt");
-    std::filesystem::copy_file(output / "123456790.jbt",
+    std::filesystem::copy_file(jbtSource / "123456789.jbt", batchInput / "123456789.jbt");
+    std::filesystem::copy_file(jbtSource / "123456790.jbt",
                                batchInput / "nested" / "123456790.jbt");
     const auto batchExpanded = transformRoot / "batch-expanded";
     bmt::UnpackJBTDirectory(batchInput, batchExpanded);
@@ -497,8 +498,8 @@ int RunTests()
 
     const auto customDirectory = output / "custom";
     std::filesystem::create_directory(customDirectory);
-    std::filesystem::copy_file(output / "123456792.jbt", customDirectory / "123456792.jbt");
-    std::filesystem::copy_file(output / "123456793.jbt", customDirectory / "123456793.jbt");
+    std::filesystem::copy_file(jbtSource / "123456792.jbt", customDirectory / "123456792.jbt");
+    std::filesystem::copy_file(jbtSource / "123456793.jbt", customDirectory / "123456793.jbt");
     auto customLoaded = bmt::LoadPacks(
         {{bmt::DLCType::Custom, customDirectory}},
         {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
@@ -519,7 +520,7 @@ int RunTests()
     try
     {
         (void)bmt::LoadPacks({
-            {bmt::DLCType::Official, output},
+            {bmt::DLCType::Official, jbtSource},
             {bmt::DLCType::Custom, conflictingDirectory},
         }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
     }
@@ -532,7 +533,7 @@ int RunTests()
 
     WriteText(conflictingDirectory / "mapping.json", "{\n  \"123456789\": 223456789\n}\n");
     auto mappedLoaded = bmt::LoadPacks({
-        {bmt::DLCType::Official, output},
+        {bmt::DLCType::Official, jbtSource},
         {bmt::DLCType::Custom, conflictingDirectory},
     }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
     assert(mappedLoaded.packs.size() == 6);
@@ -548,7 +549,7 @@ int RunTests()
 
     const auto crossPlaylistOfficial = output / "cross-playlist-official";
     std::filesystem::create_directory(crossPlaylistOfficial);
-    std::filesystem::copy_file(output / "123456792.jbt",
+    std::filesystem::copy_file(jbtSource / "123456792.jbt",
                                crossPlaylistOfficial / "123456792.jbt");
     bmt::ExportPlaylists(
         {{"22222222222222222222222222222222", "Cross-DLC mapping", {123456789}}},
@@ -563,7 +564,7 @@ int RunTests()
 
     const auto occupiedPlaylistOfficial = output / "occupied-playlist-official";
     std::filesystem::create_directory(occupiedPlaylistOfficial);
-    std::filesystem::copy_file(output / "123456789.jbt",
+    std::filesystem::copy_file(jbtSource / "123456789.jbt",
                                occupiedPlaylistOfficial / "123456789.jbt");
     bmt::ExportPlaylists(
         {{"33333333333333333333333333333333", "Occupied original ID", {123456789}}},
@@ -608,12 +609,12 @@ int RunTests()
 
     const auto duplicateDirectory = output / "duplicate-source";
     std::filesystem::create_directory(duplicateDirectory);
-    std::filesystem::copy_file(output / "123456789.jbt",
+    std::filesystem::copy_file(jbtSource / "123456789.jbt",
                                duplicateDirectory / "123456789.jbt");
-    std::filesystem::copy_file(output / "123456789.jbt",
+    std::filesystem::copy_file(jbtSource / "123456789.jbt",
                                duplicateDirectory / "323456789.jbt");
     auto deduplicated = bmt::LoadPacks({
-        {bmt::DLCType::Official, output},
+        {bmt::DLCType::Official, jbtSource},
         {bmt::DLCType::Custom, duplicateDirectory},
     }, {.mode = bmt::LoadMode::Eager, .failureMode = bmt::FailureMode::Strict});
     assert(deduplicated.packs.size() == 5);
@@ -637,7 +638,7 @@ int RunTests()
     bmt::ExportPacks(metadataDuplicateExport, metadataDuplicateDirectory,
                      {.encryptJBT = false});
     auto metadataDeduplicated = bmt::LoadPacks({
-        {bmt::DLCType::Official, output},
+        {bmt::DLCType::Official, jbtSource},
         {bmt::DLCType::Custom, metadataDuplicateDirectory},
     }, {.mode = bmt::LoadMode::Lazy, .failureMode = bmt::FailureMode::Strict});
     assert(metadataDeduplicated.packs.size() == 5);
@@ -693,9 +694,9 @@ int RunTests()
 
     const auto officialCompanionDirectory = output / "official-companions";
     std::filesystem::create_directory(officialCompanionDirectory);
-    std::filesystem::copy_file(output / "123456789.jbt",
+    std::filesystem::copy_file(jbtSource / "123456789.jbt",
                                officialCompanionDirectory / "123456789.jbt");
-    std::filesystem::copy_file(output / "mulist.plist",
+    std::filesystem::copy_file(jbtSource / "mulist.plist",
                                officialCompanionDirectory / "mulist.plist");
     std::filesystem::copy_file(output / "playlist-export" / "playlists.plist",
                                officialCompanionDirectory / "playlists.plist");
@@ -905,14 +906,35 @@ int RunTests()
     WriteBytes(rbExpanded / "note_har", {'R', 'B', 'F', 'F', 3, 4, 5, 6});
     WriteBytes(rbExpanded / "note_har2", {'R', 'B', 'F', 'F', 5, 6, 7, 8});
     WriteBytes(rbExpanded / "artwork", tinyPNG);
-    WriteBytes(rbExpanded / "unknown/member", {9, 8, 7, 6});
+    WriteBytes(rbExpanded / "title_b_h", {9, 8, 7, 6});
 
     const auto rbPlain = rbRoot / "123456789.rb";
     bmt::PackRB(rbExpanded, rbPlain, std::nullopt);
     assert(HasTrailingMD5(rbPlain));
     assert(ReadZipEntry(rbPlain, "info") == ReadBytes(rbExpanded / "info"));
-    assert(ReadZipEntry(rbPlain, "unknown/member") ==
-           ReadBytes(rbExpanded / "unknown/member"));
+    assert(ReadZipEntry(rbPlain, "title_b_h") ==
+           ReadBytes(rbExpanded / "title_b_h"));
+
+    const auto rbUnsupportedExpanded = output / "rb-unsupported-expanded";
+    const auto rbUnsupported = output / "rb-unsupported";
+    WriteText(rbUnsupportedExpanded / "info", rbInfo);
+    WriteBytes(rbUnsupportedExpanded / "debug.dat", {1, 2, 3, 4});
+    bmt::PackRB(rbUnsupportedExpanded, rbUnsupported / "123456789.rb", std::nullopt);
+    bool rejectedUnsupportedRBMember = false;
+    try
+    {
+        (void)bmt::LoadRBPacks(
+            {{bmt::DLCType::Custom, rbUnsupported}},
+            {.failureMode = bmt::FailureMode::Strict});
+    }
+    catch (const std::runtime_error& error)
+    {
+        rejectedUnsupportedRBMember =
+            std::string_view(error.what()).find("unsupported member: debug.dat") !=
+            std::string_view::npos;
+    }
+    assert(rejectedUnsupportedRBMember);
+
     const auto typedRB = bmt::LoadRBPacks(
         {{bmt::DLCType::Official, rbRoot}},
         {.mode = bmt::LoadMode::Eager,
@@ -991,8 +1013,8 @@ int RunTests()
         assert(ReadBytes(unpacked / "info") == ReadBytes(rbExpanded / "info"));
         assert(ReadBytes(unpacked / "note_bas") == ReadBytes(rbExpanded / "note_bas"));
         assert(ReadBytes(unpacked / "note_har2") == ReadBytes(rbExpanded / "note_har2"));
-        assert(ReadBytes(unpacked / "unknown/member") ==
-               ReadBytes(rbExpanded / "unknown/member"));
+        assert(ReadBytes(unpacked / "title_b_h") ==
+               ReadBytes(rbExpanded / "title_b_h"));
 
         const auto decryptedRB =
             rbRoot / (std::string("decrypted-") + std::to_string(decodeType)) /
@@ -1009,8 +1031,8 @@ int RunTests()
         assert(ReadBytes(roundTrip / "info") == ReadBytes(rbExpanded / "info"));
         assert(ReadBytes(roundTrip / "note_har2") ==
                ReadBytes(rbExpanded / "note_har2"));
-        assert(ReadBytes(roundTrip / "unknown/member") ==
-               ReadBytes(rbExpanded / "unknown/member"));
+        assert(ReadBytes(roundTrip / "title_b_h") ==
+               ReadBytes(rbExpanded / "title_b_h"));
     }
 
     const auto rbListPlain = rbRoot / "nolist.plist";
@@ -1051,6 +1073,22 @@ int RunTests()
         "artistBlackBasic2x", "artistBlackMedium2x", "artistBlackHard2x",
         "artistWhiteBasic2x", "artistWhiteMedium2x", "artistWhiteHard2x",
     };
+    static constexpr std::array<std::string_view, 42> rbHotMemberNames = {
+        "info",
+        "note_bas", "note_med", "note_har",
+        "bgm_b", "bgm_m", "bgm_h",
+        "pre", "note_bas2", "note_med2",
+        "artwork_b", "artwork_m", "artwork_h", "artwork",
+        "artwork2x_b", "artwork2x_m", "artwork2x_h", "artwork2x",
+        "title_b_b", "title_b_m", "title_b_h",
+        "title_w_b", "title_w_m", "title_w_h",
+        "title_b2x_b", "title_b2x_m", "title_b2x_h",
+        "title_w2x_b", "title_w2x_m", "title_w2x_h",
+        "artist_b_b", "artist_b_m", "artist_b_h",
+        "artist_w_b", "artist_w_m", "artist_w_h",
+        "artist_b2x_b", "artist_b2x_m", "artist_b2x_h",
+        "artist_w2x_b", "artist_w2x_m", "artist_w2x_h",
+    };
     constexpr uint32_t rbHotID = 806202001;
     constexpr std::string_view rbHotPassword = "RBHotPass!";
     const uint32_t rbHotLow = rbHotID % 23456;
@@ -1068,8 +1106,7 @@ int RunTests()
                    << "\"";
     for (uint8_t type = 0; type < rbHotFields.size(); ++type)
     {
-        const std::string name =
-            type == 0 ? "info" : "type_" + std::to_string(type);
+        const std::string name(rbHotMemberNames[type]);
         std::vector<uint8_t> plaintext;
         if (type == 0)
             plaintext.assign(rbHotInfo.begin(), rbHotInfo.end());
@@ -1226,8 +1263,8 @@ int RunTests()
          .failureMode = bmt::FailureMode::Strict,
          .mulistKey = std::string("RB-LIST-KEY")});
     assert(rbReloaded.packs.size() == 2);
-    assert(rbReloaded.packs.at(123456789).front().resources.at("unknown/member").Data() ==
-           ReadBytes(rbExpanded / "unknown/member"));
+    assert(rbReloaded.packs.at(123456789).front().resources.at("title_b_h").Data() ==
+           ReadBytes(rbExpanded / "title_b_h"));
     assert(rbReloaded.extensions.size() == 1);
     assert(rbReloaded.extensions.front().packID == 42);
     assert(rbReloaded.playlists.front().musicIDs ==
@@ -1257,7 +1294,7 @@ int RunTests()
     const auto rbConflictExpanded = rbBuild / "custom-conflict-expanded";
     WriteText(rbConflictExpanded / "info", rbInfo);
     WriteBytes(rbConflictExpanded / "note_bas", {'R', 'B', 'F', 'F', 4, 3, 2, 1});
-    WriteBytes(rbConflictExpanded / "unknown/member", {1, 1, 2, 3});
+    WriteBytes(rbConflictExpanded / "title_b_h", {1, 1, 2, 3});
     bmt::PackRB(rbConflictExpanded, rbConflict / "123456789.rb", std::nullopt);
     WriteText(rbConflict / "mapping.json", "{\"123456789\":223456789}\n");
     WriteText(

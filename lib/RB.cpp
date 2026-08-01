@@ -67,6 +67,21 @@ namespace
         "artistBlackBasic2x", "artistBlackMedium2x", "artistBlackHard2x",
         "artistWhiteBasic2x", "artistWhiteMedium2x", "artistWhiteHard2x",
     };
+    constexpr std::array<std::string_view, 52> RBMembers = {
+        "info",
+        "bgm", "bgm_b", "bgm_m", "bgm_h", "pre",
+        "note_bas", "note_bas2", "note_med", "note_med2", "note_har", "note_har2",
+        "artwork", "artwork_b", "artwork_m", "artwork_h",
+        "title_b", "title_b_b", "title_b_m", "title_b_h",
+        "artist_b", "artist_b_b", "artist_b_m", "artist_b_h",
+        "title_w", "title_w_b", "title_w_m", "title_w_h",
+        "artist_w", "artist_w_b", "artist_w_m", "artist_w_h",
+        "artwork2x", "artwork2x_b", "artwork2x_m", "artwork2x_h",
+        "title_b2x", "title_b2x_b", "title_b2x_m", "title_b2x_h",
+        "artist_b2x", "artist_b2x_b", "artist_b2x_m", "artist_b2x_h",
+        "title_w2x", "title_w2x_b", "title_w2x_m", "title_w2x_h",
+        "artist_w2x", "artist_w2x_b", "artist_w2x_m", "artist_w2x_h",
+    };
 
     struct RBHotEntry
     {
@@ -514,6 +529,9 @@ namespace
                                      filenameID);
         const uint32_t fileID = ParseUInt(filenameID, "RB filename ID");
         const auto names = ListZipEntries(path);
+        for (const auto& name : names)
+            if (std::find(RBMembers.begin(), RBMembers.end(), name) == RBMembers.end())
+                throw std::runtime_error("RB package contains an unsupported member: " + name);
         if (std::find(names.begin(), names.end(), "info") == names.end())
             throw std::runtime_error("RB package has no info member");
 
