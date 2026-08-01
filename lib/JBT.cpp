@@ -425,7 +425,7 @@ namespace
             if (!fs::is_directory(input))
                 throw std::runtime_error("input does not exist: " + input.string());
             std::vector<fs::path> directoryFiles;
-            for (const auto& entry : fs::directory_iterator(input))
+            for (const auto& entry : fs::recursive_directory_iterator(input))
             {
                 if (entry.is_regular_file() && entry.path().extension() == ".jbt")
                     directoryFiles.push_back(entry.path());

@@ -1515,11 +1515,7 @@ namespace bmt
                 playlist.dlcOrder = sourceIndex;
             }
 
-            std::vector<fs::path> files;
-            for (const auto& entry : fs::directory_iterator(source.directory))
-                if (entry.is_regular_file() && entry.path().extension() == ".rb")
-                    files.push_back(entry.path());
-            std::sort(files.begin(), files.end());
+            const auto files = RecursiveRBFiles(source.directory);
             struct LoadAttempt
             {
                 std::optional<RBMusicPack> pack;
