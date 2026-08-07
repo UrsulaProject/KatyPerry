@@ -2,10 +2,6 @@
 
 #import "Jubeat/JBTSettingsViewController.h"
 #import <QuartzCore/QuartzCore.h>
-#define FPS_KEY @"KISS_FORCED_FPS"
-#define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
-#define ANALYZER_KEY @"KISS_ENABLED_ANALYZER"
-#define REALTIME_ANALYZER_KEY @"KISS_ENABLED_REALTIME_ANALYZER"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -237,6 +233,7 @@ BOOL analyzerRealtimeEnabled() {
   }
 }
 - (void)closeSettings {
+  [[NSUserDefaults standardUserDefaults] synchronize];
   [self dismissViewControllerAnimated:YES completion:nil];
 }
 @end

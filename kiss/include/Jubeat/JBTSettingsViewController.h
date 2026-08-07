@@ -1,6 +1,10 @@
 // JBTJudgeView.h
 
 #import <UIKit/UIKit.h>
+#define FPS_KEY @"KISS_FORCED_FPS"
+#define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
+#define ANALYZER_KEY @"KISS_ENABLED_ANALYZER"
+#define REALTIME_ANALYZER_KEY @"KISS_ENABLED_REALTIME_ANALYZER"
 typedef NS_ENUM(NSInteger, JBTSettingsSection) {
     JBTSettingsSectionGeneral = 0,
     JBTSettingsSectionAnalyzer,
