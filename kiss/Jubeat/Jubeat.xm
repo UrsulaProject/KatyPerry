@@ -9,29 +9,11 @@
 #include "Jubeat/Analyzer.h"
 #include "Jubeat/JBTJudgeView.h"
 #include "Jubeat/JBTInstantJudgeView.h"
+#include "Jubeat/JBTSettingsViewController.h"
 #define MULIST_KEY @"SHARED_KEY"
-#define FPS_KEY @"KISS_FORCED_FPS"
-#define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
-#define ANALYZER_KEY @"KISS_ENABLED_ANALYZER"
-
-// DirectoryRedirect.m
 #pragma region "Jubeat"
 static id activeGameController = nil;
 static unsigned int pendingButtonDown = 0;
-static NSInteger selectedFPS(){
-    NSInteger fps = [[NSUserDefaults standardUserDefaults] integerForKey:FPS_KEY];
-    return fps == 60 || (fps == 120 && [UIScreen mainScreen].maximumFramesPerSecond >= 120) ? fps : 30;
-}
-
-static BOOL inputEdgeFixEnabled(){
-    id value = [[NSUserDefaults standardUserDefaults] objectForKey:INPUT_FIX_KEY];
-    return value ? [value boolValue] : YES;
-}
-static BOOL analyzerEnabled(){
-    id value = [[NSUserDefaults standardUserDefaults] objectForKey:ANALYZER_KEY];
-    return value ? [value boolValue] : NO;
-}
-
 static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
     id controller = activeGameController;
     id renderer = [controller valueForKey:@"mainGameRenderer"];
@@ -115,7 +97,7 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
 }
 %new
 - (void)openBemaniSettings:(UITapGestureRecognizer *)gesture {
-    UIViewController *settings = [[objc_getClass("BemaniSettingsViewController") alloc]
+    UIViewController *settings = [[JBTSettingsViewController alloc]
         initWithStyle:UITableViewStyleGrouped];
     UINavigationController *navigation = [[UINavigationController alloc]
         initWithRootViewController:settings];
@@ -162,115 +144,6 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
         buttonDown |= pendingButtonDown & buttonPress;
     pendingButtonDown = 0;
     %orig(buttonDown, buttonPress);
-}
-%end
-%subclass BemaniSettingsViewController : UITableViewController
-- (void)viewDidLoad {
-    %orig;
-    [(UITableViewController *)self setTitle:@"KISS"];
-    [(UITableViewController *)self navigationItem].leftBarButtonItem = [[[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-        target:self
-        action:@selector(closeSettings)] autorelease];
-
-    UIView *background = [[[UIView alloc]
-        initWithFrame:CGRectMake(0, 0, 0, 0)] autorelease];
-    UILabel *version = [[[UILabel alloc]
-        initWithFrame:CGRectMake(0, 0, 0, 0)] autorelease];
-    UIFontDescriptorSymbolicTraits traits =
-        UIFontDescriptorTraitBold | UIFontDescriptorTraitItalic;
-    UIFontDescriptor *descriptor = [[[UIFont systemFontOfSize:
-        [UIFont smallSystemFontSize]] fontDescriptor]
-        fontDescriptorWithSymbolicTraits:traits];
-    version.font = [UIFont fontWithDescriptor:descriptor size:0];
-    version.text = [NSString stringWithFormat:@"KISS %s @ %s",GIT_COMMIT_HASH,GIT_REFSPEC];
-    version.textAlignment = NSTextAlignmentCenter;
-    version.textColor = [UIColor grayColor];
-    version.translatesAutoresizingMaskIntoConstraints = NO;
-    [background addSubview:version];
-    [NSLayoutConstraint activateConstraints:@[
-        [version.leadingAnchor constraintEqualToAnchor:background.leadingAnchor],
-        [version.trailingAnchor constraintEqualToAnchor:background.trailingAnchor],
-        [version.bottomAnchor constraintEqualToAnchor:
-            background.layoutMarginsGuide.bottomAnchor]
-    ]];
-    [(UITableViewController *)self tableView].backgroundView = background;
-}
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 1;
-}
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 3;
-}
-- (UITableViewCell *)tableView:(UITableView *)tableView
-        cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [[[UITableViewCell alloc]
-        initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil] autorelease];
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    if (indexPath.row == 0) {
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        NSInteger selected = selectedFPS();
-        [button addTarget:self action:@selector(showFPSMenu:)
-           forControlEvents:UIControlEventTouchUpInside];
-        [button setTitle:[NSString stringWithFormat:@"%ld FPS  ▾", (long)selected]
-            forState:UIControlStateNormal];
-        [button sizeToFit];
-        cell.textLabel.text = @"Frame Rate";
-        cell.accessoryView = button;
-    } else if (indexPath.row == 1){
-        UISwitch *toggle = [[[UISwitch alloc] init] autorelease];
-        toggle.on = inputEdgeFixEnabled();
-        [toggle addTarget:self action:@selector(setInputEdgeFix:)
-            forControlEvents:UIControlEventValueChanged];
-        cell.textLabel.text = @"Input Edge Fix";
-        cell.accessoryView = toggle;
-    }
-    else{
-        UISwitch *toggle = [[[UISwitch alloc] init] autorelease];
-        toggle.on = analyzerEnabled();
-        [toggle addTarget:self action:@selector(setAnalyzer:)
-            forControlEvents:UIControlEventValueChanged];
-        cell.textLabel.text = @"Enable JubeatAnalyzer (Restart the game to take effect)";
-        cell.accessoryView = toggle;
-    }
-    return cell;
-}
-%new
-- (void)setAnalyzer:(UISwitch *)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:ANALYZER_KEY];
-}
-%new
-- (void)setInputEdgeFix:(UISwitch *)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:INPUT_FIX_KEY];
-    pendingButtonDown = 0;
-}
-%new
-- (void)showFPSMenu:(UIButton *)sender {
-    UIAlertController *menu = [UIAlertController alertControllerWithTitle:nil message:nil
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    NSInteger selected = selectedFPS();
-    NSArray *rates = [UIScreen mainScreen].maximumFramesPerSecond >= 120
-        ? @[@30, @60, @120] : @[@30, @60];
-    for (NSNumber *rate in rates) {
-        NSString *title = [NSString stringWithFormat:@"%@%@ FPS",
-            selected == rate.integerValue ? @"✓ " : @"", rate];
-        [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault
-            handler:^(UIAlertAction *action) {
-                [[NSUserDefaults standardUserDefaults] setInteger:rate.integerValue forKey:FPS_KEY];
-                [sender setTitle:[NSString stringWithFormat:@"%@ FPS  ▾", rate]
-                    forState:UIControlStateNormal];
-                [sender sizeToFit];
-            }]];
-    }
-    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel"
-        style:UIAlertActionStyleCancel handler:nil]];
-    menu.popoverPresentationController.sourceView = sender;
-    menu.popoverPresentationController.sourceRect = sender.bounds;
-    [self presentViewController:menu animated:YES completion:nil];
-}
-%new
-- (void)closeSettings {
-    [self dismissViewControllerAnimated:YES completion:nil];
 }
 %end
 %end
@@ -659,17 +532,16 @@ static void ShowInputJudges(JBTInstantJudgeView *overlay,
     self.judgeView.userInteractionEnabled = NO;
     [autoSwitchView addSubview:self.judgeView];
     [autoSwitchView bringSubviewToFront:self.judgeView];
-    self.instantJudgeView =
-        [[JBTInstantJudgeView alloc]
-            initWithFrame:self.view.bounds];
+    if(analyzerRealtimeEnabled()){
+        self.instantJudgeView = [[JBTInstantJudgeView alloc] initWithFrame:self.view.bounds];
+        self.instantJudgeView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        self.instantJudgeView.userInteractionEnabled = NO;
 
-    self.instantJudgeView.autoresizingMask =
-        UIViewAutoresizingFlexibleWidth |
-        UIViewAutoresizingFlexibleHeight;
-    self.instantJudgeView.userInteractionEnabled = NO;
+        [self.view addSubview:self.instantJudgeView];
+        [self.view bringSubviewToFront:self.instantJudgeView];
+    }
 
-    [self.view addSubview:self.instantJudgeView];
-    [self.view bringSubviewToFront:self.instantJudgeView];
+
 }
 - (void)startGame{
     %orig;
@@ -725,7 +597,10 @@ static void ShowInputJudges(JBTInstantJudgeView *overlay,
     // Capture the actual finger positions before the original loop consumes
     // the current touch state.
     //
-    const auto inputTouches = CaptureInputTouches(self, renderer, self.instantJudgeView);
+    std::vector<JBTInputTouch> inputTouches;
+    if(self.instantJudgeView){
+        inputTouches = CaptureInputTouches(self, renderer, self.instantJudgeView);
+    }
 
     //
     // IMPORTANT:
@@ -802,20 +677,21 @@ static void ShowInputJudges(JBTInstantJudgeView *overlay,
     //
     // %orig has now calculated this frame's buttonDown mask.
     //
-    uint32_t buttonDown = 0;
-
-    if (ReadIvar(
-            self,
-            "buttonDown",
-            buttonDown))
-    {
-        ShowInputJudges(
-            self.instantJudgeView,
-            inputTouches,
-            buttonDown,
-            judgeSector,
-            before,
-            analyzer->GetRecentJudges());
+    if(self.instantJudgeView){
+        uint32_t buttonDown = 0;
+        if (ReadIvar(
+                self,
+                "buttonDown",
+                buttonDown))
+        {
+            ShowInputJudges(
+                self.instantJudgeView,
+                inputTouches,
+                buttonDown,
+                judgeSector,
+                before,
+                analyzer->GetRecentJudges());
+        }
     }
 }
 %end

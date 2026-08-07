@@ -22,6 +22,7 @@ am_add_tweak(NAME KISS SRCS
           "${CMAKE_CURRENT_LIST_DIR}/Jubeat/Analyzer.cpp"
           "${CMAKE_CURRENT_LIST_DIR}/Jubeat/JBTJudgeView.m"
           "${CMAKE_CURRENT_LIST_DIR}/Jubeat/JBTInstantJudgeView.m"
+          "${CMAKE_CURRENT_LIST_DIR}/Jubeat/JBTSettingsViewController.m"
           # ReflecBeat
           "${CMAKE_CURRENT_LIST_DIR}/ReflecBeat/ReflecBeat.xm"
           # Common
