@@ -14,7 +14,21 @@ endif()
 message(STATUS "[KISS] Git Branch : ${GIT_REFSPEC}")
 message(STATUS "[KISS] Git SHA1 : ${GIT_COMMIT_HASH}")
 am_init("Naville")
-am_add_tweak(NAME KISS SRCS "${CMAKE_CURRENT_LIST_DIR}/Tweak.xm" "${CMAKE_CURRENT_LIST_DIR}/Jubeat/Jubeat.xm" "${CMAKE_CURRENT_LIST_DIR}/ReflecBeat/ReflecBeat.xm" "${CMAKE_CURRENT_LIST_DIR}/common/fishhook.c" "${CMAKE_CURRENT_LIST_DIR}/common/utils.m" NOSUBSTRATE)
+am_add_tweak(NAME KISS SRCS 
+          # Main Tweak
+          "${CMAKE_CURRENT_LIST_DIR}/Tweak.xm"
+          # Jubeat
+          "${CMAKE_CURRENT_LIST_DIR}/Jubeat/Jubeat.xm"
+          "${CMAKE_CURRENT_LIST_DIR}/Jubeat/Analyzer.cpp"
+          "${CMAKE_CURRENT_LIST_DIR}/Jubeat/JBTJudgeView.m"
+          "${CMAKE_CURRENT_LIST_DIR}/Jubeat/JBTInstantJudgeView.m"
+          # ReflecBeat
+          "${CMAKE_CURRENT_LIST_DIR}/ReflecBeat/ReflecBeat.xm"
+          # Common
+          "${CMAKE_CURRENT_LIST_DIR}/common/fishhook.c"
+          "${CMAKE_CURRENT_LIST_DIR}/common/utils.m" 
+          NOSUBSTRATE
+          )
 find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
 find_library(UIKIT_LIBRARY UIKit REQUIRED)
 find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)

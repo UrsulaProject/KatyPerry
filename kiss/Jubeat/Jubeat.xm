@@ -3,10 +3,16 @@
 #include <Foundation/Foundation.h>
 #include <UIKit/UIKit.h>
 #include <QuartzCore/QuartzCore.h>
+#include <memory>
+#include <os/log.h>
 #include "utils.h"
+#include "Jubeat/Analyzer.h"
+#include "Jubeat/JBTJudgeView.h"
+#include "Jubeat/JBTInstantJudgeView.h"
 #define MULIST_KEY @"SHARED_KEY"
 #define FPS_KEY @"KISS_FORCED_FPS"
 #define INPUT_FIX_KEY @"KISS_INPUT_EDGE_FIX"
+#define ANALYZER_KEY @"KISS_ENABLED_ANALYZER"
 
 // DirectoryRedirect.m
 #pragma region "Jubeat"
@@ -20,6 +26,10 @@ static NSInteger selectedFPS(){
 static BOOL inputEdgeFixEnabled(){
     id value = [[NSUserDefaults standardUserDefaults] objectForKey:INPUT_FIX_KEY];
     return value ? [value boolValue] : YES;
+}
+static BOOL analyzerEnabled(){
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:ANALYZER_KEY];
+    return value ? [value boolValue] : NO;
 }
 
 static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
@@ -190,7 +200,7 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
     return 1;
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 2;
+    return 3;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView
         cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -207,7 +217,7 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
         [button sizeToFit];
         cell.textLabel.text = @"Frame Rate";
         cell.accessoryView = button;
-    } else {
+    } else if (indexPath.row == 1){
         UISwitch *toggle = [[[UISwitch alloc] init] autorelease];
         toggle.on = inputEdgeFixEnabled();
         [toggle addTarget:self action:@selector(setInputEdgeFix:)
@@ -215,7 +225,19 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
         cell.textLabel.text = @"Input Edge Fix";
         cell.accessoryView = toggle;
     }
+    else{
+        UISwitch *toggle = [[[UISwitch alloc] init] autorelease];
+        toggle.on = analyzerEnabled();
+        [toggle addTarget:self action:@selector(setAnalyzer:)
+            forControlEvents:UIControlEventValueChanged];
+        cell.textLabel.text = @"Enable JubeatAnalyzer (Restart the game to take effect)";
+        cell.accessoryView = toggle;
+    }
     return cell;
+}
+%new
+- (void)setAnalyzer:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:ANALYZER_KEY];
 }
 %new
 - (void)setInputEdgeFix:(UISwitch *)sender {
@@ -253,6 +275,552 @@ static unsigned int buttonBitsForTouches(NSSet *touches, UIView *view){
 %end
 %end
 #pragma endregion
+%group JubeatAnalyzer 
+@interface GameViewController : UIViewController
+@property (retain, nonatomic) JBTJudgeView* judgeView;
+@property (retain, nonatomic) JBTInstantJudgeView* instantJudgeView;
+@end
+static std::unique_ptr<jbt::Analyzer> analyzer;
+template <typename T>
+static bool ReadIvar(id object, const char *name, T &value)
+{
+    if (!object)
+        return false;
+    Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
+    if (!ivar)
+    {
+        NSLog(@"[JubeatAnalyzer] Missing ivar: %s", name);
+        return false;
+    }
+    auto *base =
+        reinterpret_cast<uint8_t *>(object);
+    value =
+        *reinterpret_cast<T *>(
+            base + ivar_getOffset(ivar));
+    return true;
+}
+static std::vector<jbt::SequenceEvent>
+SnapshotEvents(Sequence *sequence)
+{
+    uint32_t numEvent = 0;
+    jbt::SequenceEvent *events = nullptr;
+    if (!ReadIvar(sequence, "numEvent", numEvent))
+        return {};
+    if (!ReadIvar(sequence, "events", events))
+        return {};
+    if (!events || !numEvent)
+        return {};
+    return std::vector<jbt::SequenceEvent>(
+        events,
+        events + numEvent);
+}
+static uint32_t
+GetCurrentSector(Sequence *sequence)
+{
+    uint32_t sector = 0;
+    ReadIvar(
+        sequence,
+        "_currentSector",
+        sector);
+    return sector;
+}
+static void StartAnalyzer(Sequence *sequence)
+{
+    if (!sequence)
+    {
+        analyzer.reset();
+        return;
+    }
+
+    auto events =
+        SnapshotEvents(sequence);
+
+    if (events.empty())
+    {
+        NSLog(@"[JubeatAnalyzer] Sequence contains no events");
+
+        analyzer.reset();
+        return;
+    }
+
+    analyzer.reset(
+        new jbt::Analyzer(std::move(events)));
+
+    const auto &stats =
+        analyzer->GetStatistics();
+
+    NSLog(
+        @"[JubeatAnalyzer] Start "
+         "PLAY=%u LONG=%u END=%u MEASURE=%u HAKU=%u TEMPO=%u",
+        stats.eventCount[jbt::EVENT_PLAY],
+        stats.eventCount[jbt::EVENT_LONG],
+        stats.eventCount[jbt::EVENT_END],
+        stats.eventCount[jbt::EVENT_MEASURE],
+        stats.eventCount[jbt::EVENT_HAKU],
+        stats.eventCount[jbt::EVENT_TEMPO]);
+}
+static void FinishAnalyzer()
+{
+    if (!analyzer)
+        return;
+    analyzer.reset();
+}
+struct JBTInputTouch {
+  uint32_t panel;
+  CGPoint point;
+  UITouchPhase phase;
+};
+
+static uint32_t GetPanelsForTouch(GameViewController *controller, id renderer,
+                                  CGPoint pointInGLView) {
+  bool isPad = false;
+  float displayScale = 1.0f;
+  float buttonTouchWidth = 0.0f;
+
+  if (!ReadIvar(controller, "isPad", isPad))
+    return 0;
+
+  if (!ReadIvar(controller, "displayScale", displayScale)) {
+    return 0;
+  }
+
+  if (!ReadIvar(controller, "buttonTouchWidth", buttonTouchWidth)) {
+    return 0;
+  }
+
+  if (displayScale <= 0.0f)
+    displayScale = 1.0f;
+
+  //
+  // Mirror the coordinate normalization used by the original loop.
+  //
+  const CGPoint point = CGPointMake(pointInGLView.x / displayScale,
+                                    pointInGLView.y / displayScale);
+
+  int buttonMargin = 0;
+
+  if (!isPad) {
+    Class delegateClass = NSClassFromString(@"JubeatAppDelegate");
+
+    if (delegateClass) {
+      id appDelegate = ((id (*)(id, SEL))objc_msgSend)((id)delegateClass,
+                                                       @selector(appDelegate));
+
+      if (appDelegate) {
+        const BOOL is4InchAspect = ((BOOL (*)(id, SEL))objc_msgSend)(
+            appDelegate, @selector(is4inchAspect));
+
+        if (is4InchAspect) {
+          buttonMargin = ((int (*)(id, SEL))objc_msgSend)(
+              renderer, @selector(buttonMarginForScreen40));
+        }
+      }
+    }
+  }
+
+  uint32_t result = 0;
+
+  for (uint32_t i = 0; i < 16; ++i) {
+    const uint32_t column = i & 3;
+    const uint32_t row = i >> 2;
+
+    CGRect rect;
+
+    if (isPad) {
+      rect =
+          CGRectMake(192.0 * column + 8.0, 192.0 * row + 264.0, 176.0, 176.0);
+    } else {
+      rect = CGRectMake(80.0 * column - buttonTouchWidth,
+                        buttonMargin + 80.0 * row - buttonTouchWidth + 160.0,
+                        buttonTouchWidth * 2.0 + 80.0,
+                        buttonTouchWidth * 2.0 + 80.0);
+    }
+
+    //
+    // Keep all matching panels. The original hit areas may overlap.
+    //
+    if (CGRectContainsPoint(rect, point))
+      result |= 1u << i;
+  }
+
+  return result;
+}
+
+static std::vector<JBTInputTouch>
+CaptureInputTouches(GameViewController *controller, id renderer,
+                    JBTInstantJudgeView *overlay) {
+  std::vector<JBTInputTouch> result;
+
+  if (!overlay)
+    return result;
+
+  UIView *glView = [controller glView];
+
+  if (!glView)
+    return result;
+
+  id touches = ((id (*)(id, SEL))objc_msgSend)(glView, @selector(touches));
+
+  if (!touches)
+    return result;
+
+  for (UITouch *touch in touches) {
+    if (touch.phase == UITouchPhaseEnded ||
+        touch.phase == UITouchPhaseCancelled) {
+      continue;
+    }
+
+    const CGPoint pointInGLView = [touch locationInView:glView];
+
+    const uint32_t panels =
+        GetPanelsForTouch(controller, renderer, pointInGLView);
+
+    if (!panels)
+      continue;
+
+    const CGPoint pointInOverlay = [glView convertPoint:pointInGLView
+                                                 toView:overlay];
+
+    for (uint32_t panel = 0; panel < 16; ++panel) {
+      if ((panels & (1u << panel)) == 0)
+        continue;
+
+      result.push_back({panel, pointInOverlay, touch.phase});
+    }
+  }
+
+  return result;
+}
+
+static const JBTInputTouch *
+FindTouchForPanel(const std::vector<JBTInputTouch> &touches, uint32_t panel) {
+  const JBTInputTouch *fallback = nullptr;
+
+  for (const auto &touch : touches) {
+    if (touch.panel != panel)
+      continue;
+
+    //
+    // Prefer a physical touch that actually began this frame.
+    //
+    if (touch.phase == UITouchPhaseBegan)
+      return &touch;
+
+    if (!fallback)
+      fallback = &touch;
+  }
+
+  return fallback;
+}
+
+static bool
+FindNearestUnjudgedHead(const std::vector<jbt::SequenceEvent> &events,
+                        uint32_t panel, uint32_t currentSector,
+                        int32_t &errorSector) {
+  bool found = false;
+  uint32_t bestDistance = UINT32_MAX;
+
+  for (const auto &event : events) {
+    bool candidate = false;
+
+    if (event.type == jbt::EVENT_PLAY) {
+      candidate = event.judge == jbt::JUDGE_NONE;
+    } else if (event.type == jbt::EVENT_LONG) {
+      candidate = event.holdHeadJudge == jbt::JUDGE_NONE;
+    }
+
+    if (!candidate)
+      continue;
+
+    if ((event.eve.raw & 0xF) != panel)
+      continue;
+
+    const int32_t error = static_cast<int32_t>(currentSector) -
+                          static_cast<int32_t>(event.sector);
+
+    const uint32_t distance = error < 0 ? static_cast<uint32_t>(-error)
+                                        : static_cast<uint32_t>(error);
+
+    if (distance >= bestDistance)
+      continue;
+
+    bestDistance = distance;
+    errorSector = error;
+    found = true;
+  }
+
+  return found;
+}
+
+static const jbt::JudgeRecord *
+FindImmediateJudge(const std::vector<jbt::JudgeRecord> &judges,
+                   const std::vector<bool> &used, uint32_t panel) {
+  const jbt::JudgeRecord *best = nullptr;
+  uint32_t bestDistance = UINT32_MAX;
+
+  for (size_t i = 0; i < judges.size(); ++i) {
+    if (used[i])
+      continue;
+
+    const auto &judge = judges[i];
+
+    //
+    // A button-down only corresponds to PLAY or LONG head.
+    //
+    if (judge.release)
+      continue;
+
+    if (judge.panel != panel)
+      continue;
+
+    if (judge.type != jbt::EVENT_PLAY && judge.type != jbt::EVENT_LONG) {
+      continue;
+    }
+
+    const uint32_t distance = judge.errorSector < 0
+                                  ? static_cast<uint32_t>(-judge.errorSector)
+                                  : static_cast<uint32_t>(judge.errorSector);
+
+    if (distance >= bestDistance)
+      continue;
+
+    best = &judge;
+    bestDistance = distance;
+  }
+
+  return best;
+}
+
+static void ShowInputJudges(JBTInstantJudgeView *overlay,
+                            const std::vector<JBTInputTouch> &touches,
+                            uint32_t buttonDown, uint32_t judgeSector,
+                            const std::vector<jbt::SequenceEvent> &before,
+                            const std::vector<jbt::JudgeRecord> &judges) {
+  if (!overlay || !buttonDown)
+    return;
+
+  std::vector<bool> usedJudges(judges.size(), false);
+
+  for (uint32_t panel = 0; panel < 16; ++panel) {
+    if ((buttonDown & (1u << panel)) == 0)
+      continue;
+
+    const JBTInputTouch *touch = FindTouchForPanel(touches, panel);
+
+    //
+    // Auto/replay inputs do not have a real UITouch position.
+    //
+    if (!touch)
+      continue;
+
+    NSInteger result = jbt::JUDGE_NONE;
+
+    double milliseconds = NAN;
+
+    const jbt::JudgeRecord *judge =
+        FindImmediateJudge(judges, usedJudges, panel);
+
+    if (judge) {
+      result = judge->result;
+
+      milliseconds = static_cast<double>(judge->errorSector) * 1000.0 / 300.0;
+      analyzer->RecordPressTiming(judge->index,judge->errorSector);
+
+      const size_t judgeIndex = static_cast<size_t>(judge - judges.data());
+
+      usedJudges[judgeIndex] = true;
+    } else {
+      //
+      // The user pressed a panel but the game did not resolve a judge
+      // this frame, e.g. an input outside the judgement window.
+      //
+      int32_t errorSector = 0;
+
+      if (FindNearestUnjudgedHead(before, panel, judgeSector, errorSector)) {
+        milliseconds = static_cast<double>(errorSector) * 1000.0 / 300.0;
+      }
+    }
+
+    [overlay showJudge:result
+        timingOffsetMilliseconds:milliseconds
+                         atPoint:touch->point];
+  }
+}
+
+%hook GameViewController
+%property (retain, nonatomic) JBTJudgeView* judgeView;
+%property (retain, nonatomic) JBTInstantJudgeView* instantJudgeView;
+- (void)loadResources{
+    %orig;
+    UIView* autoSwitchView = nil; // This seems to be cover
+    if (!ReadIvar(self, "autoSwitch", autoSwitchView))
+        return;
+    self.judgeView = [[JBTJudgeView alloc] initWithFrame:autoSwitchView.bounds];
+    self.judgeView.userInteractionEnabled = NO;
+    [autoSwitchView addSubview:self.judgeView];
+    [autoSwitchView bringSubviewToFront:self.judgeView];
+    self.instantJudgeView =
+        [[JBTInstantJudgeView alloc]
+            initWithFrame:self.view.bounds];
+
+    self.instantJudgeView.autoresizingMask =
+        UIViewAutoresizingFlexibleWidth |
+        UIViewAutoresizingFlexibleHeight;
+    self.instantJudgeView.userInteractionEnabled = NO;
+
+    [self.view addSubview:self.instantJudgeView];
+    [self.view bringSubviewToFront:self.instantJudgeView];
+}
+- (void)startGame{
+    %orig;
+    Sequence* seq = [self performSelector:@selector(sequence)];
+    StartAnalyzer(seq);
+    [self.instantJudgeView clear];
+}
+- (void)restartGame{
+    %orig;
+    Sequence* seq = [self performSelector:@selector(sequence)];
+    StartAnalyzer(seq);
+    [self.instantJudgeView clear];
+}
+- (void)end{
+    FinishAnalyzer();
+    [self.instantJudgeView clear];
+    %orig;
+}
+- (void)loop:(id)sender
+{
+    //
+    // Only state 3 executes Sequence::judge:btnPress:.
+    //
+    if (!analyzer)
+    {
+        %orig;
+        return;
+    }
+
+    id renderer =
+        [self mainGameRenderer];
+
+    const unsigned int state =
+        [renderer state];
+
+    if (state != 3)
+    {
+        %orig;
+        return;
+    }
+
+    Sequence *sequence =
+        [self sequence];
+
+    if (!sequence)
+    {
+        %orig;
+        return;
+    }
+
+
+    //
+    // Capture the actual finger positions before the original loop consumes
+    // the current touch state.
+    //
+    const auto inputTouches = CaptureInputTouches(self, renderer, self.instantJudgeView);
+
+    //
+    // IMPORTANT:
+    //
+    // The original loop calls Sequence::judge BEFORE seekToTime:.
+    // Therefore this is the exact sector seen by judge:btnPress:.
+    //
+    const uint32_t judgeSector =
+        GetCurrentSector(sequence);
+
+
+    //
+    // Capture the event runtime state before judgement.
+    //
+    auto before =
+        SnapshotEvents(sequence);
+
+    if (before.empty())
+    {
+        %orig;
+        return;
+    }
+
+    analyzer->BeforeJudge(before);
+
+
+    //
+    // Original loop:
+    //
+    //   input calculation
+    //   Sequence::judge(...)
+    //   Sequence::seekToTime(...)
+    //   rendering...
+    //
+    %orig;
+
+
+    //
+    // saveScore / restart etc. could theoretically destroy the analyzer from
+    // inside %orig. Do not access it afterwards if that happened.
+    //
+    if (!analyzer)
+        return;
+
+
+    //
+    // Capture the event runtime state after judgement.
+    //
+    auto after =
+        SnapshotEvents(sequence);
+
+    if (after.empty())
+        return;
+
+
+    //
+    // Use judgeSector, NOT the current sector after %orig.
+    //
+    // seekToTime: has already advanced _currentSector by this point.
+    //
+    analyzer->AfterJudge(
+        after,
+        judgeSector);
+    const auto &stats = analyzer->GetStatistics();
+    double songAverageMS = analyzer->GetSongAverageTimingMs();
+    double regionAverageMS = analyzer->GetCurrentRegionAverageTimingMs(judgeSector);
+    self.judgeView.perfect = stats.perfect;
+    self.judgeView.great = stats.great;
+    self.judgeView.good = stats.good;
+    self.judgeView.poor = stats.poor;
+    self.judgeView.miss = stats.miss;
+    self.judgeView.songAverageMS = songAverageMS;
+    self.judgeView.regionAverageMS = regionAverageMS;
+    //
+    // %orig has now calculated this frame's buttonDown mask.
+    //
+    uint32_t buttonDown = 0;
+
+    if (ReadIvar(
+            self,
+            "buttonDown",
+            buttonDown))
+    {
+        ShowInputJudges(
+            self.instantJudgeView,
+            inputTouches,
+            buttonDown,
+            judgeSector,
+            before,
+            analyzer->GetRecentJudges());
+    }
+}
+%end
+%end
+
 extern "C" void init_Jubeat(void){
     %init(Jubeat);
     // Set MarkerInfo
@@ -275,4 +843,5 @@ extern "C" void init_Jubeat(void){
         [[NSUserDefaults standardUserDefaults] synchronize];
         [markerList release];
     }
+    %init(JubeatAnalyzer);
 }
