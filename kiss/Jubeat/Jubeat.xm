@@ -560,8 +560,28 @@ static void ShowInputJudges(JBTInstantJudgeView *overlay,
     [self.instantJudgeView clear];
     %orig;
 }
-- (void)loop:(id)sender
+- (void)loop:(CADisplayLink*)link
 {
+
+    static NSUInteger frames = 0;
+    static CFTimeInterval lastTime = 0;
+    ++frames;
+
+    if (lastTime){
+        CFTimeInterval elapsed = link.timestamp - lastTime;
+        if (elapsed >= 1.0) {
+            double currentFPS = frames / elapsed;
+            self.judgeView.FPS = currentFPS;
+            frames = 0;
+            lastTime = link.timestamp;
+        }
+    }
+    else{
+        lastTime = link.timestamp;
+    }
+        
+
+
     //
     // Only state 3 executes Sequence::judge:btnPress:.
     //
@@ -572,7 +592,7 @@ static void ShowInputJudges(JBTInstantJudgeView *overlay,
     }
 
     id renderer =
-        [self mainGameRenderer];
+        [self performSelector:@selector(mainGameRenderer)];
 
     const unsigned int state =
         [renderer state];

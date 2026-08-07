@@ -174,6 +174,12 @@ static void JBTConfigureLineGlow(
         [[UIVisualEffectView alloc] initWithEffect:nil];
 
     self.blurView.userInteractionEnabled = NO;
+    self.blurView.layer.cornerRadius = 15.0;
+    self.blurView.clipsToBounds = YES;
+    if (@available(iOS 13.0, *)) {
+        self.blurView.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+
     [self addSubview:self.blurView];
 
     self.blurAnimator =
@@ -194,8 +200,9 @@ static void JBTConfigureLineGlow(
         @"GOOD",
         @"POOR",
         @"MISS",
-        @"SONG Timing Offset",
-        @"REGION Timing Offset"
+        @"SONG Timing",
+        @"REGION Timing",
+        @"FPS"
     ];
 
     NSArray<UIColor *> *colors = @[
@@ -203,9 +210,10 @@ static void JBTConfigureLineGlow(
         [UIColor colorWithRed:1.00 green:0.65 blue:0.00 alpha:1.0],
         [UIColor colorWithRed:0.00 green:0.75 blue:1.00 alpha:1.0],
         [UIColor colorWithRed:1.00 green:0.10 blue:0.50 alpha:1.0],
-        [UIColor colorWithWhite:0.82 alpha:1.0],
-        [UIColor greenColor],
+        [UIColor darkGrayColor],
+        [UIColor blackColor],
         [UIColor purpleColor],
+        [UIColor redColor],
     ];
 
     NSMutableArray *titleLabels =
@@ -234,8 +242,8 @@ static void JBTConfigureLineGlow(
 
         titleGlowLabel.text = titles[i];
         titleGlowLabel.font =
-            [UIFont systemFontOfSize:20.0
-                              weight:UIFontWeightMedium];
+            [UIFont systemFontOfSize:22.0
+                              weight:UIFontWeightHeavy];
 
         titleGlowLabel.adjustsFontSizeToFitWidth = YES;
         titleGlowLabel.minimumScaleFactor = 0.5;
@@ -261,8 +269,8 @@ static void JBTConfigureLineGlow(
         titleLabel.textColor = color;
 
         titleLabel.font =
-            [UIFont systemFontOfSize:20.0
-                              weight:UIFontWeightMedium];
+            [UIFont systemFontOfSize:22.0
+                              weight:UIFontWeightBold];
 
         titleLabel.backgroundColor =
             UIColor.clearColor;
@@ -291,7 +299,7 @@ static void JBTConfigureLineGlow(
 
         valueGlowLabel.font =
             [UIFont systemFontOfSize:20.0
-                              weight:UIFontWeightRegular];
+                              weight:UIFontWeightSemibold];
 
         valueGlowLabel.textAlignment =
             NSTextAlignmentRight;
@@ -318,7 +326,7 @@ static void JBTConfigureLineGlow(
 
         valueLabel.font =
             [UIFont systemFontOfSize:20.0
-                              weight:UIFontWeightRegular];
+                              weight:UIFontWeightMedium];
 
         valueLabel.textAlignment =
             NSTextAlignmentRight;
@@ -551,7 +559,7 @@ static void JBTConfigureLineGlow(
 
         const CGFloat titleWidth =
             width
-            - horizontalPadding * 2.0
+            - horizontalPadding * 1.5
             - valueWidth
             - gap;
 
@@ -590,7 +598,7 @@ static void JBTConfigureLineGlow(
             CGRectMake(
                 horizontalPadding,
                 y + rowHeight - lineHeight,
-                width - horizontalPadding * 2.0,
+                width - horizontalPadding * 1.0,
                 lineHeight
             );
     }
@@ -704,6 +712,19 @@ static void JBTConfigureLineGlow(
         text;
 
     self.valueGlowLabels[6].text =
+        text;
+}
+- (void)setFPS:(double)value
+{
+    _FPS = value;
+
+    NSString *text =
+        [NSString stringWithFormat:@"%f FPS",value];
+
+    self.valueLabels[7].text =
+        text;
+
+    self.valueGlowLabels[7].text =
         text;
 }
 @end

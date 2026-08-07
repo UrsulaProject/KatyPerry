@@ -11,5 +11,6 @@
 @property(nonatomic, assign) NSInteger miss;
 @property(nonatomic, assign) double songAverageMS;
 @property(nonatomic, assign) double regionAverageMS;
+@property(nonatomic, assign) double FPS;
 
 @end
