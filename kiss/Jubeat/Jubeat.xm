@@ -739,5 +739,7 @@ extern "C" void init_Jubeat(void){
         [[NSUserDefaults standardUserDefaults] synchronize];
         [markerList release];
     }
-    %init(JubeatAnalyzer);
+    if(analyzerEnabled()){
+        %init(JubeatAnalyzer);
+    }
 }
